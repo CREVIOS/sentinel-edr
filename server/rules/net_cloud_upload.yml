@@ -1,0 +1,22 @@
+id: net-cloud-storage-upload
+title: Large upload to personal cloud storage
+status: stable
+description: >
+  Outbound transfer to consumer cloud-storage / file-sharing domains. Combined with the
+  DLP engine this flags potential unsanctioned data movement.
+severity: medium
+category: network
+mitre:
+  - T1567.002
+tactic: Exfiltration
+detection:
+  dest:
+    network.category:
+      - cloud_storage
+    network.direction:
+      - outbound
+  size:
+    network.bytes_out|gt: 10485760
+  condition: dest and size
+falsepositives:
+  - Sanctioned backups to approved cloud accounts

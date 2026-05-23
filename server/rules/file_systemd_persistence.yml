@@ -1,0 +1,19 @@
+id: file-systemd-persistence
+title: Persistence via systemd unit
+status: stable
+description: A new or modified systemd service/timer unit can re-launch malware on boot.
+severity: high
+category: file
+mitre:
+  - T1543.002
+tactic: Persistence
+detection:
+  selection:
+    file.path|contains:
+      - "/etc/systemd/system/"
+      - "/lib/systemd/system/"
+      - "/.config/systemd/user/"
+    file.op:
+      - create
+      - write
+  condition: selection

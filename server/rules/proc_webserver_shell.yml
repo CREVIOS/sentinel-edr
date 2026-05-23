@@ -1,0 +1,30 @@
+id: proc-webserver-spawns-shell
+title: Web server process spawned a shell
+status: stable
+description: >
+  A web/application server process (nginx, apache, php-fpm, java, tomcat) spawning an
+  interactive shell strongly suggests web-shell or exploitation activity.
+severity: high
+category: process
+mitre:
+  - T1059
+  - T1505.003
+tactic: Execution
+auto_respond: kill_process
+detection:
+  parent:
+    process.parent:
+      - nginx
+      - apache2
+      - httpd
+      - php-fpm
+      - java
+      - tomcat
+      - node
+  child:
+    process.name:
+      - bash
+      - sh
+      - dash
+      - zsh
+  condition: parent and child

@@ -1,0 +1,17 @@
+id: usb-mass-storage-inserted
+title: Removable storage device connected
+status: stable
+description: A USB mass-storage device was attached — a primary DLP exfiltration channel.
+severity: medium
+category: usb
+mitre:
+  - T1200
+tactic: Initial Access
+detection:
+  selection:
+    usb.action:
+      - insert
+      - mount
+  condition: selection
+falsepositives:
+  - Approved removable media on whitelisted endpoints

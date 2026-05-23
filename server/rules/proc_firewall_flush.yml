@@ -1,0 +1,18 @@
+id: proc-firewall-disabled
+title: Host firewall flushed or disabled
+status: stable
+description: Flushing iptables/nftables or disabling ufw/firewalld weakens egress controls.
+severity: high
+category: process
+mitre:
+  - T1562.004
+tactic: Defense Evasion
+detection:
+  selection:
+    process.cmdline|contains:
+      - "iptables -F"
+      - "iptables --flush"
+      - "nft flush ruleset"
+      - "ufw disable"
+      - "systemctl stop firewalld"
+  condition: selection

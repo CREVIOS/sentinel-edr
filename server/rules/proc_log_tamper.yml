@@ -1,0 +1,21 @@
+id: proc-log-tampering
+title: Log clearing or shell history tampering
+status: stable
+description: Deletion or truncation of system logs / shell history to cover tracks.
+severity: medium
+category: process
+mitre:
+  - T1070.002
+  - T1070.003
+tactic: Defense Evasion
+detection:
+  selection:
+    process.cmdline|contains:
+      - "rm -rf /var/log"
+      - "rm -f /var/log"
+      - "history -c"
+      - "> /var/log/"
+      - "truncate -s 0 /var/log"
+      - "unset HISTFILE"
+      - "export HISTFILE=/dev/null"
+  condition: selection

@@ -1,0 +1,18 @@
+id: file-ssh-authorized-keys
+title: SSH authorized_keys modified
+status: stable
+description: Adding an SSH key to authorized_keys is a stealthy persistence/backdoor method.
+severity: high
+category: file
+mitre:
+  - T1098.004
+tactic: Persistence
+detection:
+  selection:
+    file.path|endswith:
+      - "authorized_keys"
+    file.op:
+      - write
+      - create
+      - rename
+  condition: selection

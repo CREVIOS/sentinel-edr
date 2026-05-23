@@ -1,0 +1,27 @@
+# Go
+server/sentinel-server
+/bin/
+
+# Rust
+agent/target/
+
+# Node / console
+web/node_modules/
+web/dist/
+
+# Local state / secrets
+.env
+certs/
+*.db
+*.db-*
+
+# OS
+.DS_Store
+
+# Next.js console (dashboard/)
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.env*
+.env.local
+*.log

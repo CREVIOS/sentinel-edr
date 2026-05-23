@@ -1,0 +1,30 @@
+# systemd unit for the Sentinel endpoint agent (production install).
+#   sudo cp deploy/sentinel-agent.service /etc/systemd/system/
+#   sudo install -m0755 bin/sentinel-agent /usr/local/bin/sentinel-agent
+#   sudo systemctl enable --now sentinel-agent
+[Unit]
+Description=Sentinel Endpoint Agent (EDR/DLP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Enrollment + server config (override in /etc/sentinel/agent.env)
+# Expected env includes SENTINEL_SERVER, SENTINEL_ENROLL_TOKEN, and, when mTLS is enabled,
+# SENTINEL_AGENT_TLS_CA, SENTINEL_AGENT_TLS_CERT, SENTINEL_AGENT_TLS_KEY.
+EnvironmentFile=-/etc/sentinel/agent.env
+ExecStart=/usr/local/bin/sentinel-agent
+Restart=always
+RestartSec=5
+# Always-on, survives reboots; restarts on crash.
+StateDirectory=sentinel
+Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json
+# Real enforcement (nftables isolation/upload-block, USB module unload) needs privilege:
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_KILL
+NoNewPrivileges=no
+# Hardening
+ProtectHome=read-only
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

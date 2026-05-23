@@ -1,0 +1,20 @@
+id: auth-root-password-login
+title: Direct root login over SSH
+status: stable
+description: Interactive root login via password is high risk and often policy-violating.
+severity: medium
+category: auth
+mitre:
+  - T1078.003
+tactic: Initial Access
+detection:
+  selection:
+    user:
+      - root
+    auth.method:
+      - password
+    auth.result:
+      - success
+  condition: selection
+falsepositives:
+  - Break-glass administrative access

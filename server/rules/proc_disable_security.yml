@@ -1,0 +1,21 @@
+id: proc-disable-security-tooling
+title: Security tooling or auditing disabled
+status: stable
+description: >
+  Attempts to stop auditd, disable SELinux/AppArmor, or unload security modules —
+  classic defense-evasion before further malicious activity.
+severity: high
+category: process
+mitre:
+  - T1562.001
+tactic: Defense Evasion
+detection:
+  selection:
+    process.cmdline|contains:
+      - "systemctl stop auditd"
+      - "service auditd stop"
+      - "setenforce 0"
+      - "systemctl stop apparmor"
+      - "auditctl -e 0"
+      - "systemctl stop falco"
+  condition: selection

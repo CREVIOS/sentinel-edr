@@ -1,0 +1,18 @@
+id: pkg-package-modification
+title: System package installed or removed
+status: stable
+description: Tracks package manager changes for configuration drift and supply-chain review.
+severity: low
+category: package
+mitre:
+  - T1072
+tactic: Execution
+detection:
+  selection:
+    action:
+      - package_install
+      - package_remove
+      - package_upgrade
+  condition: selection
+falsepositives:
+  - Routine patching windows

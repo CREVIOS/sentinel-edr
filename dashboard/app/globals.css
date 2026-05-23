@@ -1,0 +1,182 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Sentinel "Aurora Indigo" theme — a colored (not black) deep-indigo console.
+  Dark by default for SOC use; refined light theme included.
+*/
+
+:root {
+  --radius: 0.7rem;
+
+  --background: oklch(0.97 0.01 265);
+  --foreground: oklch(0.24 0.03 265);
+  --card: oklch(0.99 0.005 265);
+  --card-foreground: oklch(0.24 0.03 265);
+  --popover: oklch(0.99 0.005 265);
+  --popover-foreground: oklch(0.24 0.03 265);
+  --primary: oklch(0.55 0.2 280);
+  --primary-foreground: oklch(0.99 0.01 280);
+  --secondary: oklch(0.93 0.02 265);
+  --secondary-foreground: oklch(0.3 0.04 265);
+  --muted: oklch(0.94 0.015 265);
+  --muted-foreground: oklch(0.52 0.03 265);
+  --accent: oklch(0.92 0.04 200);
+  --accent-foreground: oklch(0.28 0.04 265);
+  --destructive: oklch(0.58 0.22 18);
+  --border: oklch(0.88 0.02 265);
+  --input: oklch(0.9 0.02 265);
+  --ring: oklch(0.55 0.2 280);
+
+  --chart-1: oklch(0.62 0.2 285);
+  --chart-2: oklch(0.7 0.13 190);
+  --chart-3: oklch(0.78 0.15 80);
+  --chart-4: oklch(0.65 0.22 15);
+  --chart-5: oklch(0.7 0.13 220);
+
+  --sidebar: oklch(0.96 0.012 265);
+  --sidebar-foreground: oklch(0.26 0.03 265);
+  --sidebar-primary: oklch(0.55 0.2 280);
+  --sidebar-primary-foreground: oklch(0.99 0.01 280);
+  --sidebar-accent: oklch(0.92 0.03 265);
+  --sidebar-accent-foreground: oklch(0.28 0.04 265);
+  --sidebar-border: oklch(0.88 0.02 265);
+  --sidebar-ring: oklch(0.55 0.2 280);
+
+  --sev-critical: oklch(0.6 0.23 18);
+  --sev-high: oklch(0.72 0.18 55);
+  --sev-medium: oklch(0.82 0.16 90);
+  --sev-low: oklch(0.65 0.16 235);
+  --sev-info: oklch(0.6 0.03 265);
+}
+
+.dark {
+  /* deep indigo navy — explicitly NOT black */
+  --background: oklch(0.21 0.035 274);
+  --foreground: oklch(0.95 0.012 265);
+  --card: oklch(0.255 0.04 274);
+  --card-foreground: oklch(0.95 0.012 265);
+  --popover: oklch(0.245 0.04 274);
+  --popover-foreground: oklch(0.95 0.012 265);
+  --primary: oklch(0.72 0.16 285);
+  --primary-foreground: oklch(0.19 0.04 274);
+  --secondary: oklch(0.31 0.04 274);
+  --secondary-foreground: oklch(0.95 0.012 265);
+  --muted: oklch(0.3 0.035 274);
+  --muted-foreground: oklch(0.72 0.03 270);
+  --accent: oklch(0.34 0.05 280);
+  --accent-foreground: oklch(0.96 0.012 265);
+  --destructive: oklch(0.65 0.22 18);
+  --border: oklch(0.98 0 0 / 11%);
+  --input: oklch(0.98 0 0 / 14%);
+  --ring: oklch(0.72 0.16 285);
+
+  --chart-1: oklch(0.72 0.17 290);
+  --chart-2: oklch(0.74 0.14 188);
+  --chart-3: oklch(0.8 0.15 85);
+  --chart-4: oklch(0.68 0.22 12);
+  --chart-5: oklch(0.72 0.13 225);
+
+  --sidebar: oklch(0.18 0.035 274);
+  --sidebar-foreground: oklch(0.92 0.012 265);
+  --sidebar-primary: oklch(0.72 0.16 285);
+  --sidebar-primary-foreground: oklch(0.18 0.04 274);
+  --sidebar-accent: oklch(0.29 0.04 280);
+  --sidebar-accent-foreground: oklch(0.96 0.012 265);
+  --sidebar-border: oklch(0.98 0 0 / 9%);
+  --sidebar-ring: oklch(0.72 0.16 285);
+
+  --sev-critical: oklch(0.66 0.23 18);
+  --sev-high: oklch(0.75 0.18 55);
+  --sev-medium: oklch(0.84 0.16 90);
+  --sev-low: oklch(0.68 0.16 235);
+  --sev-info: oklch(0.7 0.03 270);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sev-critical: var(--sev-critical);
+  --color-sev-high: var(--sev-high);
+  --color-sev-medium: var(--sev-medium);
+  --color-sev-low: var(--sev-low);
+  --color-sev-info: var(--sev-info);
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* ---- login / brand atmospherics ---- */
+@keyframes aurora-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.9; }
+  50% { transform: translate3d(4%, -3%, 0) scale(1.12); opacity: 1; }
+}
+@keyframes aurora-drift-2 {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); opacity: 0.8; }
+  50% { transform: translate3d(-5%, 4%, 0) scale(1); opacity: 1; }
+}
+@keyframes float-grid {
+  from { background-position: 0 0; }
+  to { background-position: 46px 46px; }
+}
+
+.aurora-blob {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  will-change: transform;
+}
+.grid-veil {
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(ellipse 80% 80% at 50% 40%, #000 30%, transparent 80%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob { animation: none !important; }
+}

@@ -1,0 +1,19 @@
+id: file-cron-persistence
+title: Persistence via cron
+status: stable
+description: Creation or modification of cron jobs is a common persistence mechanism.
+severity: high
+category: file
+mitre:
+  - T1053.003
+tactic: Persistence
+detection:
+  selection:
+    file.path|contains:
+      - "/etc/cron"
+      - "/var/spool/cron"
+    file.op:
+      - create
+      - write
+      - rename
+  condition: selection

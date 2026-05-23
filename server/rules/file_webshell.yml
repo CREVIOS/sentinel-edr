@@ -1,0 +1,27 @@
+id: file-webshell-dropped
+title: Possible web shell written to web root
+status: stable
+description: A script file created under a web-served directory may be a web shell.
+severity: high
+category: file
+mitre:
+  - T1505.003
+tactic: Persistence
+detection:
+  location:
+    file.path|contains:
+      - "/var/www/"
+      - "/usr/share/nginx/"
+      - "/srv/www/"
+  script:
+    file.path|endswith:
+      - ".php"
+      - ".jsp"
+      - ".asp"
+      - ".aspx"
+      - ".phtml"
+  op:
+    file.op:
+      - create
+      - write
+  condition: location and script and op

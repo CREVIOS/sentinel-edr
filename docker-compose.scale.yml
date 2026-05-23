@@ -1,0 +1,89 @@
+# Horizontally-scaled Sentinel topology (self-contained).
+#
+#   docker compose -f docker-compose.scale.yml up -d --scale gateway=3 --scale worker=4
+#
+# Tiers (one binary, different SENTINEL_ROLE):
+#   gateway    — serves REST/WebSocket + agent ingest, bridges the NATS control mesh (scale N)
+#   worker     — consumes the event bus: Sigma + DLP + persist + auto-response (scale M)
+#   correlator — single stateful consumer for behavioral correlation
+#   nginx      — load balancer / single entry point on :8080
+#
+# Stateless tiers scale freely; the correlator runs as exactly one consumer so it sees the
+# whole event stream (windowed brute-force / exfil / beaconing state stays consistent).
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    volumes:
+      - tsdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nats:
+    image: nats:2
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    build: { context: ., dockerfile: server/Dockerfile }
+    image: sentinel/server:local
+    restart: unless-stopped
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      nats: { condition: service_healthy }
+    environment: &srvenv
+      SENTINEL_ENV: ${SENTINEL_ENV:-development}
+      SENTINEL_DATABASE_URL: postgres://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel}@timescaledb:5432/${POSTGRES_DB:-sentinel}?sslmode=disable
+      SENTINEL_NATS_URL: nats://nats:4222
+      SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN:-change-me-enrollment-token}
+      SENTINEL_ADMIN_USER: ${SENTINEL_ADMIN_USER:-admin}
+      SENTINEL_ADMIN_PASS: ${SENTINEL_ADMIN_PASS:-sentinel-admin}
+      SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET:-shared-dev-jwt-secret-please-change-32b}
+      SENTINEL_ALLOW_ORIGINS: ${SENTINEL_ALLOW_ORIGINS:-}
+      SENTINEL_TRUSTED_PROXIES: ${SENTINEL_TRUSTED_PROXIES:-172.16.0.0/12}
+      SENTINEL_ROLE: gateway
+
+  worker:
+    image: sentinel/server:local
+    restart: unless-stopped
+    depends_on:
+      gateway: { condition: service_started }
+    environment:
+      <<: *srvenv
+      SENTINEL_ROLE: worker
+      SENTINEL_CORRELATE: "false"
+
+  correlator:
+    image: sentinel/server:local
+    restart: unless-stopped
+    depends_on:
+      gateway: { condition: service_started }
+    environment:
+      <<: *srvenv
+      SENTINEL_ROLE: correlator
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:8080"
+
+volumes:
+  tsdata:

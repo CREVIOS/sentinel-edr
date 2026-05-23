@@ -1,0 +1,84 @@
+# Single-node Sentinel stack. Always-on (restart: unless-stopped), health-gated startup.
+#   docker compose up -d        → TimescaleDB + NATS + server (role=all) + agent (scenario)
+#   docker compose logs -f      → watch
+# For horizontal scale-out, see docker-compose.scale.yml.
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    volumes:
+      - tsdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "5432:5432"
+
+  nats:
+    image: nats:2
+    restart: unless-stopped
+    command: ["-js", "-m", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "4222:4222"
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      SENTINEL_ROLE: all
+      SENTINEL_ENV: ${SENTINEL_ENV:-development}
+      SENTINEL_HTTP_ADDR: ":8080"
+      SENTINEL_DATABASE_URL: postgres://${POSTGRES_USER:-sentinel}:${POSTGRES_PASSWORD:-sentinel}@timescaledb:5432/${POSTGRES_DB:-sentinel}?sslmode=disable
+      SENTINEL_NATS_URL: nats://nats:4222
+      SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN:-change-me-enrollment-token}
+      SENTINEL_ADMIN_USER: ${SENTINEL_ADMIN_USER:-admin}
+      SENTINEL_ADMIN_PASS: ${SENTINEL_ADMIN_PASS:-sentinel-admin}
+      SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET:-}
+      SENTINEL_ALLOW_ORIGINS: ${SENTINEL_ALLOW_ORIGINS:-}
+      SENTINEL_TRUSTED_PROXIES: ${SENTINEL_TRUSTED_PROXIES:-}
+    ports:
+      - "8080:8080"
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    # NET_ADMIN lets the agent apply nftables isolation/upload-block rules.
+    cap_add:
+      - NET_ADMIN
+    environment:
+      SENTINEL_SERVER: http://server:8080
+      SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN:-change-me-enrollment-token}
+      SENTINEL_WATCH: /etc,/usr/local/bin
+      SENTINEL_AGENT_TLS_CA: ${SENTINEL_AGENT_TLS_CA:-}
+      SENTINEL_AGENT_TLS_CERT: ${SENTINEL_AGENT_TLS_CERT:-}
+      SENTINEL_AGENT_TLS_KEY: ${SENTINEL_AGENT_TLS_KEY:-}
+    command: ["--scenario", "--interval", "5", "--labels", "docker,demo"]
+    volumes:
+      - agentstate:/var/lib/sentinel
+
+volumes:
+  tsdata:
+  agentstate:

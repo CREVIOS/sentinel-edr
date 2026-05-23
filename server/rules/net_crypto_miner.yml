@@ -1,0 +1,20 @@
+id: net-cryptomining-pool
+title: Connection to cryptomining pool
+status: stable
+description: Outbound traffic to known mining pool domains indicates resource hijacking.
+severity: high
+category: network
+mitre:
+  - T1496
+tactic: Impact
+detection:
+  selection:
+    network.domain|contains:
+      - "pool.minexmr"
+      - "xmrpool"
+      - "nanopool"
+      - "supportxmr"
+      - "minexmr.com"
+      - "f2pool"
+      - "nicehash"
+  condition: selection

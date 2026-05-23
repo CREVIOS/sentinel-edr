@@ -1,0 +1,25 @@
+id: proc-download-exec
+title: Remote payload downloaded and piped to a shell
+status: stable
+description: >
+  curl/wget output piped directly into an interpreter — a common malware staging
+  and one-line installer technique.
+severity: high
+category: process
+mitre:
+  - T1105
+  - T1059.004
+tactic: Execution
+detection:
+  selection_tool:
+    process.cmdline|contains:
+      - "curl "
+      - "wget "
+  selection_pipe:
+    process.cmdline|contains:
+      - "| bash"
+      - "| sh"
+      - "|bash"
+      - "|sh"
+      - "| python"
+  condition: selection_tool and selection_pipe

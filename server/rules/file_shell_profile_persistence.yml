@@ -1,0 +1,24 @@
+id: file-shell-profile-persistence
+title: Persistence via shell init / rc files
+status: stable
+description: Writes to rc.local, profile.d, or shell rc files to gain execution on login.
+severity: medium
+category: file
+mitre:
+  - T1546.004
+tactic: Persistence
+detection:
+  selection:
+    file.path|contains:
+      - "/etc/rc.local"
+      - "/etc/profile.d/"
+      - "/.bashrc"
+      - "/.bash_profile"
+      - "/.profile"
+      - "/.zshrc"
+    file.op:
+      - write
+      - create
+  condition: selection
+falsepositives:
+  - Users customizing their own shell environment

@@ -1,0 +1,36 @@
+export type Severity = "info" | "low" | "medium" | "high" | "critical";
+
+export interface Process { pid?: number; ppid?: number; name?: string; exe?: string; cmdline?: string; user?: string; parent?: string; }
+export interface FileInfo { path?: string; op?: string; size?: number; hash?: string; }
+export interface NetInfo { direction?: string; proto?: string; remote?: string; domain?: string; url?: string; category?: string; bytes_out?: number; bytes_in?: number; blocked?: boolean; }
+export interface UsbInfo { action?: string; vendor?: string; product?: string; serial?: string; mount?: string; size_gb?: number; }
+export interface AuthInfo { method?: string; source_ip?: string; tty?: string; result?: string; }
+export interface DlpInfo { classifier?: string; channel?: string; matches?: number; sample?: string; verdict?: string; }
+
+export interface Event {
+  id: string; agent_id: string; hostname: string; ts: string; category: string; action: string;
+  severity: Severity; user?: string; message?: string;
+  process?: Process; file?: FileInfo; network?: NetInfo; usb?: UsbInfo; auth?: AuthInfo; dlp?: DlpInfo; labels?: string[];
+}
+export interface Agent {
+  id: string; hostname: string; os: string; kernel: string; arch: string; ip: string; mac: string;
+  version: string; status: "online" | "offline" | "isolated"; labels?: string[];
+  enrolled_at: string; last_seen: string; event_count: number;
+}
+export interface Detection {
+  id: string; ts: string; rule_id: string; rule_name: string; severity: Severity; category: string;
+  agent_id: string; hostname: string; user?: string; summary: string; mitre?: string[]; tactic?: string;
+  status: "open" | "acknowledged" | "closed"; event_ids?: string[]; engine: string; assigned_to?: string;
+}
+export interface ResponseAction {
+  id: string; ts: string; type: string; agent_id: string; hostname: string; target: Record<string, unknown>;
+  reason: string; issued_by: string; detection_id?: string; status: string; result?: string; automated: boolean;
+}
+export interface Rule { ID: string; Title: string; Severity: string; Category: string; Tactic: string; Description: string; AutoRespond: string; MITRE: string[] | null; }
+export interface Overview {
+  counts: Record<string, number>;
+  severity: Record<string, number>;
+  events_by_category: Record<string, number>;
+  timeline: { hour: string; count: number }[];
+  top_mitre: { tactic: string; count: number }[];
+}

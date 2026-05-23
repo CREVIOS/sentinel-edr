@@ -1,0 +1,27 @@
+id: proc-reverse-shell
+title: Reverse shell execution
+status: stable
+description: >
+  Detects classic Linux reverse-shell one-liners (bash /dev/tcp, netcat -e,
+  python/perl/php interactive sockets). Strong indicator of remote code execution.
+severity: critical
+category: process
+mitre:
+  - T1059.004
+tactic: Execution
+auto_respond: kill_process
+falsepositives:
+  - Authorized penetration tests
+detection:
+  selection:
+    process.cmdline|contains:
+      - "/dev/tcp/"
+      - "/dev/udp/"
+      - "nc -e"
+      - "ncat -e"
+      - "bash -i >&"
+      - "sh -i >&"
+      - "python -c 'import socket"
+      - "import pty; pty.spawn"
+      - "perl -e 'use Socket"
+  condition: selection

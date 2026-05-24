@@ -14,14 +14,14 @@ DASH="$(cd "$HERE/../../dashboard" && pwd)"
 ENV_FILE="$HERE/.env"
 NET="sentinel_internal"
 NODE_IMG="node:22-bookworm-slim"
-MEM="${BUILD_MEM:-10g}"
+MEM="${BUILD_MEM:-14g}"
 
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE"; exit 1; }
 
 echo "==> [1/4] building standalone artifact (capped ${MEM})"
 rm -rf "$DASH/.next"
 docker run --rm -m "$MEM" -v "$DASH":/app -w /app -e NEXT_TELEMETRY_DISABLED=1 "$NODE_IMG" \
-  bash -c 'corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS=--max-old-space-size=6144 pnpm build'
+  bash -c 'corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS=--max-old-space-size=8192 pnpm build'
 [ -f "$DASH/.next/standalone/server.js" ] || { echo "build produced no standalone output"; exit 1; }
 
 echo "==> [2/4] applying Better Auth migrations"

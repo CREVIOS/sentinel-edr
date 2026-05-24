@@ -1,53 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Next 16 renamed `middleware` → `proxy`. Two jobs:
+// Next 16 renamed `middleware` → `proxy`. Jobs:
 //   1. Block PUBLIC self-registration (sign-in/session/sign-out still work). Defence-in-depth
 //      alongside auth.ts `disableSignUp`.
-//   2. Emit a per-request nonce Content-Security-Policy so script-src needs no 'unsafe-inline'
-//      — Next injects this nonce into its own <script> tags when it sees it on the request CSP
-//      header. 'strict-dynamic' lets those trusted scripts load the chunk graph.
+//   2. Set a Content-Security-Policy in production.
+//
+// NOTE: a per-request nonce + 'strict-dynamic' was tried but Next 16 (standalone output) does
+// NOT propagate the nonce onto its emitted <script> chunk tags, so strict-dynamic blocked the
+// entire app. We therefore use a static policy: script chunks are same-origin ('self') and the
+// small Next bootstrap inline scripts need 'unsafe-inline'. CSP is production-only — dev needs
+// eval()/inline for HMR + next-themes.
 export function proxy(req: NextRequest) {
   if (req.method === "POST" && req.nextUrl.pathname.startsWith("/api/auth/sign-up")) {
     return NextResponse.json({ error: "self-registration disabled" }, { status: 403 });
   }
 
-  // In development Next/Turbopack/HMR + next-themes need eval() and inline bootstrap scripts,
-  // which a strict nonce CSP forbids — so the hardened CSP is PRODUCTION-ONLY. The production
-  // build emits no eval/inline, so the nonce policy holds there.
-  if (process.env.NODE_ENV !== "production") {
-    return NextResponse.next();
+  const res = NextResponse.next();
+  if (process.env.NODE_ENV === "production") {
+    res.headers.set(
+      "content-security-policy",
+      [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "form-action 'self'",
+      ].join("; "),
+    );
   }
-
-  // Web Crypto (Edge runtime has no Buffer); base64 nonce.
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  const nonce = btoa(String.fromCharCode(...bytes));
-
-  const csp = [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    "style-src 'self' 'unsafe-inline'", // Next/Tailwind inject some inline styles
-    "img-src 'self' data: blob:",
-    "font-src 'self' data:",
-    "connect-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "form-action 'self'",
-  ].join("; ");
-
-  const requestHeaders = new Headers(req.headers);
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set("content-security-policy", csp);
-
-  const res = NextResponse.next({ request: { headers: requestHeaders } });
-  res.headers.set("content-security-policy", csp);
   return res;
 }
 
 export const config = {
-  // Run on auth (for the signup block) and on document routes (for the nonce CSP), but skip
-  // static assets, the image optimizer, and prefetches.
   matcher: [
     {
       source: "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|sh)$).*)",

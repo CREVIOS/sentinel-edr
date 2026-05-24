@@ -1,0 +1,17 @@
+id: sys-rootkit-hidden-pid
+title: Hidden process (rootkit indicator)
+status: stable
+description: >
+  A process is reachable via kill(2) but absent from /proc — the classic getdents()
+  hook used by LKM/userland rootkits to hide processes. Treat as compromise.
+severity: critical
+category: system
+mitre:
+  - T1014
+tactic: Defense Evasion
+falsepositives:
+  - Extremely rare PID-reuse race during the sweep
+detection:
+  selection:
+    action: rootkit_hidden_pid
+  condition: selection

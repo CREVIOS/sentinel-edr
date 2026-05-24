@@ -107,6 +107,21 @@ func TestPreloadPersistenceDetected(t *testing.T) {
 	}
 }
 
+func TestRootkitAndPostureRules(t *testing.T) {
+	e := loadEngine(t)
+	cases := map[string]string{
+		"rootkit_hidden_pid": "sys-rootkit-hidden-pid",
+		"preload_tamper":     "sys-preload-tamper",
+		"hardening_posture":  "sys-hardening-posture",
+	}
+	for action, ruleID := range cases {
+		ev := &model.Event{Category: model.CatSystem, Action: action, Message: "test " + action}
+		if !firedIDs(e.Eval(ev))[ruleID] {
+			t.Fatalf("expected %s to fire for action=%s", ruleID, action)
+		}
+	}
+}
+
 func TestWebserverShellRequiresBothSelections(t *testing.T) {
 	e := loadEngine(t)
 	// parent nginx + child bash => fire

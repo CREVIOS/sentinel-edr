@@ -1,0 +1,15 @@
+id: sys-preload-tamper
+title: ld.so.preload tampering (LD_PRELOAD rootkit)
+status: stable
+description: >
+  /etc/ld.so.preload was created or changed. This file force-loads a shared object into
+  every dynamically-linked process — a common userland rootkit / credential-theft persistence.
+severity: critical
+category: system
+mitre:
+  - T1574.006
+tactic: Persistence
+detection:
+  selection:
+    action: preload_tamper
+  condition: selection

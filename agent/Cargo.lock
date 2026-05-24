@@ -1442,6 +1442,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "hostname",
+ "libc",
  "mac_address",
  "rand 0.8.6",
  "regex",

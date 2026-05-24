@@ -656,6 +656,219 @@ fn loaded_modules() -> Vec<String> {
     }
 }
 
+// ---------------- rootkit indicators ----------------
+
+/// Looks for rootkit tells: PIDs reachable via kill(2) but hidden from /proc (the classic
+/// getdents hook), /etc/ld.so.preload tampering (LD_PRELOAD rootkits), and kernel taint.
+/// Throttled — the PID sweep is bounded and only runs every ~60 ticks.
+pub struct RootkitCollector {
+    seen_hidden: HashSet<i32>,
+    preload_sig: Option<String>,
+    first: bool,
+    ticks: u64,
+}
+
+impl RootkitCollector {
+    pub fn new() -> Self {
+        RootkitCollector { seen_hidden: HashSet::new(), preload_sig: None, first: true, ticks: 0 }
+    }
+
+    pub fn poll(&mut self) -> Vec<Event> {
+        self.ticks = self.ticks.wrapping_add(1);
+        if self.ticks % 60 != 1 {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        // hidden processes
+        for pid in hidden_pids() {
+            if self.seen_hidden.insert(pid) {
+                out.push(
+                    Event::new("system", "rootkit_hidden_pid", "critical")
+                        .msg(format!("hidden process pid {pid}: reachable via kill(2) but absent from /proc (getdents hook)")),
+                );
+            }
+        }
+        // ld.so.preload tamper
+        if let Some(sig) = preload_signature() {
+            if self.preload_sig.as_deref() != Some(sig.as_str()) {
+                let known = self.preload_sig.is_some();
+                self.preload_sig = Some(sig.clone());
+                if !self.first || known {
+                    out.push(
+                        Event::new("system", "preload_tamper", "critical")
+                            .msg(format!("/etc/ld.so.preload present/changed: {sig}")),
+                    );
+                }
+            }
+        } else {
+            self.preload_sig = None;
+        }
+        // kernel taint (module load / out-of-tree)
+        if let Some(t) = kernel_tainted() {
+            if t != 0 && self.first {
+                out.push(
+                    Event::new("system", "kernel_tainted", "medium")
+                        .msg(format!("kernel taint flags = {t} (out-of-tree/forced module loaded)")),
+                );
+            }
+        }
+        self.first = false;
+        out
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn hidden_pids() -> Vec<i32> {
+    let visible: HashSet<i32> = std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_string_lossy().parse::<i32>().ok())
+        .collect();
+    // bound the sweep so it stays cheap (kill(2) is fast but pid_max can be millions)
+    let max = std::fs::read_to_string("/proc/sys/kernel/pid_max")
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .unwrap_or(65536)
+        .min(131072);
+    let mut hidden = Vec::new();
+    for pid in 2..=max {
+        // kill(pid,0): Ok or EPERM => process exists; ESRCH => it doesn't.
+        let r = unsafe { libc::kill(pid, 0) };
+        let exists = r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if exists && !visible.contains(&pid) {
+            hidden.push(pid);
+        }
+    }
+    hidden
+}
+#[cfg(not(target_os = "linux"))]
+fn hidden_pids() -> Vec<i32> {
+    Vec::new()
+}
+
+fn preload_signature() -> Option<String> {
+    let body = std::fs::read_to_string("/etc/ld.so.preload").ok()?;
+    let t = body.trim();
+    if t.is_empty() {
+        return None;
+    }
+    Some(truncate(t, 200))
+}
+
+#[cfg(target_os = "linux")]
+fn kernel_tainted() -> Option<u64> {
+    std::fs::read_to_string("/proc/sys/kernel/tainted")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+}
+#[cfg(not(target_os = "linux"))]
+fn kernel_tainted() -> Option<u64> {
+    None
+}
+
+// ---------------- hardening posture ----------------
+
+/// Periodically grades host hardening: key sysctls, kernel lockdown, IMA, Secure-Boot tells.
+/// Emits a single rolled-up posture event (info/medium/high by worst finding).
+pub struct PostureCollector {
+    reported: bool,
+    ticks: u64,
+}
+
+impl PostureCollector {
+    pub fn new() -> Self {
+        PostureCollector { reported: false, ticks: 0 }
+    }
+
+    pub fn poll(&mut self) -> Vec<Event> {
+        self.ticks = self.ticks.wrapping_add(1);
+        // once at startup, then every ~30 min (assuming a few-second interval, 600 ticks)
+        if self.reported && self.ticks % 600 != 0 {
+            return Vec::new();
+        }
+        self.reported = true;
+        let (findings, sev) = grade_posture(&read_posture());
+        if findings.is_empty() {
+            return Vec::new();
+        }
+        let mut ev = Event::new("system", "hardening_posture", sev)
+            .msg(format!("host hardening: {} weak setting(s) — {}", findings.len(), findings.join("; ")));
+        ev.extra.insert(
+            "weak".into(),
+            serde_json::Value::Array(findings.into_iter().map(serde_json::Value::String).collect()),
+        );
+        vec![ev]
+    }
+}
+
+/// Read the posture inputs (name -> value). Linux reads /proc/sys + /sys/kernel/security.
+fn read_posture() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    #[cfg(target_os = "linux")]
+    {
+        let rd = |p: &str| std::fs::read_to_string(p).ok().map(|s| s.trim().to_string());
+        for (k, p) in [
+            ("kptr_restrict", "/proc/sys/kernel/kptr_restrict"),
+            ("dmesg_restrict", "/proc/sys/kernel/dmesg_restrict"),
+            ("kexec_load_disabled", "/proc/sys/kernel/kexec_load_disabled"),
+            ("unprivileged_bpf_disabled", "/proc/sys/kernel/unprivileged_bpf_disabled"),
+            ("ptrace_scope", "/proc/sys/kernel/yama/ptrace_scope"),
+            ("rp_filter", "/proc/sys/net/ipv4/conf/all/rp_filter"),
+        ] {
+            if let Some(v) = rd(p) {
+                m.insert(k.to_string(), v);
+            }
+        }
+        if let Some(v) = rd("/sys/kernel/security/lockdown") {
+            m.insert("lockdown".into(), v);
+        }
+        m.insert(
+            "ima".into(),
+            if std::path::Path::new("/sys/kernel/security/ima").exists() { "present".into() } else { "absent".into() },
+        );
+        m.insert(
+            "secureboot".into(),
+            if std::path::Path::new("/sys/firmware/efi").exists() { "efi".into() } else { "legacy".into() },
+        );
+    }
+    m
+}
+
+/// Grade posture inputs into a list of weak-setting findings + an overall severity. Pure/testable.
+fn grade_posture(m: &HashMap<String, String>) -> (Vec<String>, &'static str) {
+    let mut weak = Vec::new();
+    let want_ge1 = |k: &str, label: &str, out: &mut Vec<String>| {
+        if let Some(v) = m.get(k) {
+            if v == "0" {
+                out.push(label.to_string());
+            }
+        }
+    };
+    want_ge1("kptr_restrict", "kptr_restrict=0 (kernel pointers exposed)", &mut weak);
+    want_ge1("dmesg_restrict", "dmesg_restrict=0 (dmesg world-readable)", &mut weak);
+    want_ge1("kexec_load_disabled", "kexec_load not disabled", &mut weak);
+    want_ge1("unprivileged_bpf_disabled", "unprivileged_bpf enabled", &mut weak);
+    if m.get("ptrace_scope").map(|v| v == "0").unwrap_or(false) {
+        weak.push("yama ptrace_scope=0 (any process can ptrace)".into());
+    }
+    if m.get("lockdown").map(|v| v.contains("[none]")).unwrap_or(false) {
+        weak.push("kernel lockdown=none".into());
+    }
+    if m.get("ima").map(|v| v == "absent").unwrap_or(false) {
+        weak.push("IMA not enabled (no runtime integrity measurement)".into());
+    }
+    // severity: any of the critical-ish → high, else medium
+    let sev = if weak.iter().any(|w| w.contains("bpf") || w.contains("lockdown") || w.contains("kexec")) {
+        "high"
+    } else if weak.is_empty() {
+        "info"
+    } else {
+        "medium"
+    };
+    (weak, sev)
+}
+
 // ---------------- file integrity monitoring ----------------
 
 pub struct FimCollector {
@@ -1337,6 +1550,27 @@ tmpfs /mnt/should_skip tmpfs rw 0 0
         assert!(longest_hex_run("docker").is_none()); // short
         let id = "abcdef0123456789abcdef0123456789abcd"; // 36 hex
         assert_eq!(longest_hex_run(&format!("x-{id}.scope")).as_deref(), Some(id));
+    }
+
+    #[test]
+    fn posture_grading() {
+        let mut m = std::collections::HashMap::new();
+        m.insert("kptr_restrict".into(), "0".into());
+        m.insert("unprivileged_bpf_disabled".into(), "0".into());
+        m.insert("ima".into(), "absent".into());
+        let (weak, sev) = grade_posture(&m);
+        assert!(weak.iter().any(|w| w.contains("kptr_restrict")));
+        assert!(weak.iter().any(|w| w.contains("bpf")));
+        assert!(weak.iter().any(|w| w.contains("IMA")));
+        assert_eq!(sev, "high"); // bpf weak → high
+        // hardened host → no findings, info
+        let mut good = std::collections::HashMap::new();
+        good.insert("kptr_restrict".into(), "2".into());
+        good.insert("unprivileged_bpf_disabled".into(), "1".into());
+        good.insert("ima".into(), "present".into());
+        let (w2, s2) = grade_posture(&good);
+        assert!(w2.is_empty());
+        assert_eq!(s2, "info");
     }
 
     #[test]

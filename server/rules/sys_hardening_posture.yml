@@ -1,0 +1,17 @@
+id: sys-hardening-posture
+title: Weak host hardening posture
+status: stable
+description: >
+  The endpoint reported weak kernel hardening (sysctls, lockdown, IMA, kexec, unprivileged
+  BPF). Not an active attack but expands attack surface; track for compliance/baseline drift.
+severity: medium
+category: system
+mitre:
+  - T1562
+tactic: Defense Evasion
+falsepositives:
+  - Hosts with an intentionally relaxed baseline (dev/lab)
+detection:
+  selection:
+    action: hardening_posture
+  condition: selection

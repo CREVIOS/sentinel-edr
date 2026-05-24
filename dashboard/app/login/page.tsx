@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { signIn, twoFactor } from "@/lib/auth-client";
@@ -18,14 +18,12 @@ const FEATURES = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@sentinel.local");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [twoFA, setTwoFA] = useState(false);
   const [code, setCode] = useState("");
-
-  useEffect(() => { fetch("/api/bootstrap").catch(() => {}); }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -127,7 +125,6 @@ export default function LoginPage() {
                 </Button>
                 {err && <p className="text-sm text-destructive">{err}</p>}
               </form>
-              <p className="mt-7 font-mono text-[11px] text-muted-foreground">dev · admin@sentinel.local / sentinel-admin</p>
             </>
           )}
         </div>

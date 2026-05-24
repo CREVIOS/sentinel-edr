@@ -20,7 +20,7 @@ function StatMini({ label, value, accent }: { label: string; value: React.ReactN
 }
 
 export default function InternetPage() {
-  const { data: events } = useData<Event[]>("events?category=network&limit=300", 4000);
+  const { data: events } = useData<Event[]>("events?category=network&limit=300", 5000, "event");
   const net = (events || []).filter((e) => e.network);
   const totalOut = net.reduce((s, e) => s + (e.network!.bytes_out || 0), 0);
   const cloud = net.filter((e) => e.network!.category === "cloud_storage").length;

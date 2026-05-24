@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useData } from "@/lib/use-data";
-import type { Overview } from "@/lib/types";
+import { useStreamStatus } from "@/lib/use-stream";
 
 export function LiveStatus() {
-  const { live } = useData<Overview>("stats/overview", 5000);
+  // True push-channel status: green when the SSE relay to the control plane is connected.
+  const live = useStreamStatus();
   const [now, setNow] = useState("");
   useEffect(() => {
     const t = setInterval(() => setNow(new Date().toISOString().slice(11, 19)), 1000);

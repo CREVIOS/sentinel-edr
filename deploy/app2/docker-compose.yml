@@ -52,7 +52,11 @@ services:
       timescaledb: { condition: service_healthy }
       nats: { condition: service_started }
     environment:
-      SENTINEL_ENV: development            # TLS terminated at nginx; not exposed to host
+      # Production hard-gate ON. TLS is terminated by the shared nginx, so BEHIND_PROXY=true
+      # waives the server-side-TLS requirement while still enforcing strong secrets + origins.
+      SENTINEL_ENV: production
+      SENTINEL_BEHIND_PROXY: "true"
+      SENTINEL_ALLOW_ORIGINS: https://app2.makebell.com
       SENTINEL_ROLE: all
       SENTINEL_DATABASE_URL: postgres://sentinel:${PGPW}@timescaledb:5432/sentinel?sslmode=disable
       SENTINEL_NATS_URL: nats://nats:4222

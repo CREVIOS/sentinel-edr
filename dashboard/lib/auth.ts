@@ -11,7 +11,23 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   emailAndPassword: {
     enabled: true,
-    minPasswordLength: 8,
+    minPasswordLength: 12,
+    // No public self-registration. Operators are provisioned by an admin (seed script /
+    // invite), never by anyone who can reach the console. Defence-in-depth alongside the
+    // middleware block in proxy.ts.
+    disableSignUp: true,
+  },
+  // Brute-force protection on the public auth surface (sign-in/2FA), keyed per client IP by
+  // Better Auth. Stricter than the default for credential endpoints.
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 60,
+    customRules: {
+      "/sign-in/email": { window: 60, max: 8 },
+      "/two-factor/verify-totp": { window: 60, max: 8 },
+      "/two-factor/enable": { window: 60, max: 5 },
+    },
   },
   session: {
     expiresIn: 60 * 60 * 12, // 12h

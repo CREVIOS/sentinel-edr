@@ -31,8 +31,8 @@ function Stat({ label, value, sub, icon: Icon }: { label: string; value: React.R
 }
 
 export default function OverviewPage() {
-  const { data: ov } = useData<Overview>("stats/overview", 4000);
-  const { data: dets } = useData<Detection[]>("detections?limit=8", 4000);
+  const { data: ov } = useData<Overview>("stats/overview", 4000, "detection");
+  const { data: dets } = useData<Detection[]>("detections?limit=8", 4000, "detection");
   const c = ov?.counts || {};
   const timeline = (ov?.timeline || []).map((t) => ({ t: t.hour.slice(11, 16), count: t.count }));
   const sevData = Object.entries(ov?.severity || {}).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value }));

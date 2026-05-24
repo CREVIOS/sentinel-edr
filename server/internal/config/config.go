@@ -25,6 +25,7 @@ type Config struct {
 	TLSCert        string // path to server TLS cert (enables HTTPS)
 	TLSKey         string // path to server TLS key
 	TLSClientCA    string // path to CA that signs agent client certs (enables mTLS)
+	BehindProxy    bool   // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
 	RulesDir       string // directory of Sigma-style YAML rules
 	WebDir         string // optional external dir for the built console (else embedded)
 	Correlate      bool   // worker also runs behavioral correlation
@@ -51,6 +52,7 @@ func Load() *Config {
 		RulesDir:    env("SENTINEL_RULES_DIR", "rules"),
 		WebDir:      env("SENTINEL_WEB_DIR", ""),
 		Correlate:   env("SENTINEL_CORRELATE", "true") != "false",
+		BehindProxy: env("SENTINEL_BEHIND_PROXY", "") == "true",
 	}
 	if o := env("SENTINEL_ALLOW_ORIGINS", ""); o != "" {
 		c.AllowOrigins = strings.Split(o, ",")
@@ -92,8 +94,8 @@ func (c *Config) Validate() error {
 	if c.AdminPass == "" || c.AdminPass == "sentinel-admin" {
 		problems = append(problems, "SENTINEL_ADMIN_PASS must be set to a strong, non-default value")
 	}
-	if !c.TLSEnabled() {
-		problems = append(problems, "TLS is required in production (set SENTINEL_TLS_CERT and SENTINEL_TLS_KEY)")
+	if !c.TLSEnabled() && !c.BehindProxy {
+		problems = append(problems, "TLS is required in production (set SENTINEL_TLS_CERT and SENTINEL_TLS_KEY, or SENTINEL_BEHIND_PROXY=true if TLS is terminated upstream)")
 	}
 	if len(c.AllowOrigins) == 0 {
 		problems = append(problems, "SENTINEL_ALLOW_ORIGINS must be set to restrict console origins")

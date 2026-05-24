@@ -56,7 +56,7 @@ function StatusBadge({ ok }: { ok: boolean }) {
 
 export default function SettingsPage() {
   const { data: session } = useSession();
-  const { data: ov, live } = useData<Overview>("stats/overview", 6000);
+  const { data: ov, live } = useData<Overview>("stats/overview", 6000, "detection");
   const c = ov?.counts || {};
 
   return (

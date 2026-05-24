@@ -28,7 +28,7 @@ function StatMini({ label, value, accent }: { label: string; value: React.ReactN
 }
 
 export default function ResponsesPage() {
-  const { data: responses } = useData<ResponseAction[]>("responses", 3000);
+  const { data: responses } = useData<ResponseAction[]>("responses", 3000, "response");
   const r = responses || [];
   const auto = r.filter((x) => x.automated).length;
   const done = r.filter((x) => x.status === "completed").length;

@@ -16,7 +16,7 @@ import type { Agent } from "@/lib/types";
 import { MoreHorizontal, ShieldOff, ShieldCheck, Usb, CloudOff } from "lucide-react";
 
 export default function EndpointsPage() {
-  const { data: agents } = useData<Agent[]>("agents", 5000);
+  const { data: agents } = useData<Agent[]>("agents", 5000, "agent");
   const [sel, setSel] = useState<Agent | null>(null);
 
   async function act(a: Agent, type: string, label: string) {

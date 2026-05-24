@@ -1,8 +1,18 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { subscribe } from "./use-stream";
 
-/** Poll a BFF endpoint (relative to /api/proxy/) on an interval for near-real-time data. */
-export function useData<T>(path: string, intervalMs = 4000): { data: T | undefined; live: boolean } {
+/**
+ * Poll a BFF endpoint (relative to /api/proxy/) on an interval for near-real-time data.
+ * When `revalidateOn` is set (a stream type like "detection"|"agent"|"response"), an inbound
+ * push triggers an immediate (debounced) refetch — instant updates with the poll as a safety
+ * net. With push wired the interval can be relaxed (it only backstops missed pushes).
+ */
+export function useData<T>(
+  path: string,
+  intervalMs = 4000,
+  revalidateOn?: string,
+): { data: T | undefined; live: boolean } {
   const [data, setData] = useState<T>();
   const [live, setLive] = useState(false);
   const path0 = useRef(path);
@@ -10,6 +20,7 @@ export function useData<T>(path: string, intervalMs = 4000): { data: T | undefin
 
   useEffect(() => {
     let on = true;
+    let debounce: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       try {
         const r = await fetch(`/api/proxy/${path0.current}`, { cache: "no-store" });
@@ -22,8 +33,14 @@ export function useData<T>(path: string, intervalMs = 4000): { data: T | undefin
     };
     tick();
     const id = setInterval(tick, intervalMs);
-    return () => { on = false; clearInterval(id); };
-  }, [path, intervalMs]);
+    const unsub = revalidateOn
+      ? subscribe(revalidateOn, () => {
+          if (debounce) return; // coalesce bursts into one refetch
+          debounce = setTimeout(() => { debounce = null; tick(); }, 250);
+        })
+      : undefined;
+    return () => { on = false; clearInterval(id); if (debounce) clearTimeout(debounce); unsub?.(); };
+  }, [path, intervalMs, revalidateOn]);
 
   return { data, live };
 }
@@ -39,9 +56,15 @@ interface HasIdTs { id: string; ts: string }
  */
 export function useLiveList<T extends HasIdTs>(
   basePath: string,
-  opts: { pageSize?: number; liveMs?: number; live?: boolean; cap?: number } = {},
+  opts: {
+    pageSize?: number; liveMs?: number; live?: boolean; cap?: number;
+    /** stream type to prepend in real time (e.g. "event"); poll stays as a safety net */
+    pushType?: string;
+    /** keep only pushes matching this page's filter (push carries the whole fleet) */
+    pushFilter?: (x: T) => boolean;
+  } = {},
 ) {
-  const { pageSize = 100, liveMs = 2000, live: liveEnabled = true, cap = 2000 } = opts;
+  const { pageSize = 100, liveMs = 2000, live: liveEnabled = true, cap = 2000, pushType, pushFilter } = opts;
   const [items, setItems] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -104,6 +127,22 @@ export function useLiveList<T extends HasIdTs>(
     const id = setInterval(tick, liveMs);
     return () => { on = false; clearInterval(id); };
   }, [basePath, liveEnabled, liveMs, cap]);
+
+  // real-time push: prepend matching rows as the server broadcasts them (no poll latency)
+  const filt = useRef(pushFilter);
+  filt.current = pushFilter;
+  useEffect(() => {
+    if (!liveEnabled || !pushType) return;
+    return subscribe(pushType, (raw) => {
+      const x = raw as T;
+      if (!x || !x.id || seen.current.has(x.id)) return;
+      if (filt.current && !filt.current(x)) return;
+      seen.current.add(x.id);
+      if (x.ts > newest.current) newest.current = x.ts;
+      setItems((prev) => [x, ...prev].slice(0, cap));
+      setConnected(true);
+    });
+  }, [basePath, liveEnabled, pushType, cap]);
 
   const loadMore = async () => {
     setLoadingMore(true);

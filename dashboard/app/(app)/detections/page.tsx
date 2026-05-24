@@ -21,7 +21,7 @@ export default function DetectionsPage() {
   const [sev, setSev] = useState("all");
   const [sel, setSel] = useState<Detection | null>(null);
   const path = useMemo(() => `detections?limit=300${status !== "all" ? `&status=${status}` : ""}`, [status]);
-  const { data: all } = useData<Detection[]>(path, 3000);
+  const { data: all } = useData<Detection[]>(path, 3000, "detection");
   const dets = (all || []).filter((d) => sev === "all" || d.severity === sev);
 
   async function setStat(d: Detection, s: string) {

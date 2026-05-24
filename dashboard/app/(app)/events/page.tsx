@@ -74,7 +74,13 @@ export default function EventsPage() {
     return qs ? `events?${qs}` : "events";
   }, [cat, sev, dq]);
   const { items: events, loading, loadingMore, hasMore, connected, loadMore } =
-    useLiveList<Event>(basePath, { pageSize: 100, liveMs: 2000, live });
+    useLiveList<Event>(basePath, {
+      pageSize: 100, liveMs: 2000, live,
+      // real-time push prepends matching events instantly; disabled while a text search is
+      // active (server-side search can't be replicated client-side), falling back to poll.
+      pushType: dq ? undefined : "event",
+      pushFilter: (e) => (cat === "all" || e.category === cat) && (sev === "all" || e.severity === sev),
+    });
 
   return (
     <div className="space-y-4">

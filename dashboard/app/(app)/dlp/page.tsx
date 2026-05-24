@@ -26,7 +26,7 @@ function StatMini({ label, value, accent }: { label: string; value: React.ReactN
 }
 
 export default function DlpPage() {
-  const { data: events } = useData<Event[]>("events?category=dlp&limit=200", 4000);
+  const { data: events } = useData<Event[]>("events?category=dlp&limit=200", 5000, "event");
   const { data: classifiers } = useData<Classifier[]>("dlp/classifiers", 60000);
   const { data: policies } = useData<Policy[]>("dlp/policies", 60000);
   const dlp = events || [];

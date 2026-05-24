@@ -5,7 +5,7 @@ import "server-only";
 
 let cached: { token: string; exp: number } | null = null;
 
-async function goToken(): Promise<string> {
+export async function goToken(): Promise<string> {
   if (cached && cached.exp > Date.now()) return cached.token;
   const res = await fetch(`${process.env.GO_API}/api/v1/login`, {
     method: "POST",

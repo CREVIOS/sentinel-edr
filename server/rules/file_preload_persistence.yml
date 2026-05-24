@@ -1,0 +1,29 @@
+id: file-preload-persistence
+title: Loader / PAM / sudoers persistence tamper
+status: stable
+description: >
+  Detects writes to high-value persistence & privilege files: the dynamic-loader
+  preload hooks (/etc/ld.so.preload, /etc/ld.so.conf*) used by LD_PRELOAD rootkits,
+  PAM modules (/etc/pam.d, pam_*.so) used for auth backdoors, and sudoers. Any
+  modification here is a strong persistence / privilege-escalation signal.
+severity: high
+category: file
+mitre:
+  - T1574.006
+  - T1556.003
+  - T1548.003
+tactic: Persistence
+falsepositives:
+  - Package manager updating PAM modules or ldconfig during legitimate installs
+detection:
+  selection:
+    file.path|contains:
+      - "/etc/ld.so.preload"
+      - "/etc/ld.so.conf"
+      - "/etc/pam.d/"
+      - "pam_"
+      - "/etc/sudoers"
+  filter:
+    file.op:
+      - read
+  condition: selection and not filter

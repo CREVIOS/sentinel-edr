@@ -88,6 +88,25 @@ func TestRemovableMountDetected(t *testing.T) {
 	}
 }
 
+func TestPreloadPersistenceDetected(t *testing.T) {
+	e := loadEngine(t)
+	write := &model.Event{
+		Category: model.CatFile, Action: "write",
+		File: &model.FileInfo{Path: "/etc/ld.so.preload", Op: "write"},
+	}
+	if !firedIDs(e.Eval(write))["file-preload-persistence"] {
+		t.Fatalf("expected file-preload-persistence to fire on write")
+	}
+	// a plain read of the same path must NOT fire (filter excludes reads)
+	read := &model.Event{
+		Category: model.CatFile, Action: "read",
+		File: &model.FileInfo{Path: "/etc/ld.so.preload", Op: "read"},
+	}
+	if firedIDs(e.Eval(read))["file-preload-persistence"] {
+		t.Fatalf("read of ld.so.preload should not fire")
+	}
+}
+
 func TestWebserverShellRequiresBothSelections(t *testing.T) {
 	e := loadEngine(t)
 	// parent nginx + child bash => fire

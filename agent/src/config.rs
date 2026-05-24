@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(
         long,
         env = "SENTINEL_WATCH",
-        default_value = "/etc,/root,/home,/var/www,/usr/local/bin"
+        default_value = "/etc,/root,/home,/var/www,/usr/local/bin,/lib/systemd/system,/usr/lib/systemd/system,/var/spool/cron"
     )]
     pub watch: String,
 

@@ -1,0 +1,33 @@
+id: proc-gtfobins
+title: GTFOBins / LOLBin shell escape
+status: stable
+description: >
+  Detects living-off-the-land binaries being used to break out to a shell or run
+  arbitrary commands — a common privilege-escalation / sandbox-escape technique
+  (find -exec, awk BEGIN system, interpreter -c/-e os.system, tar checkpoint, etc.).
+severity: high
+category: process
+mitre:
+  - T1059
+  - T1548
+tactic: Privilege Escalation
+falsepositives:
+  - Administrative scripts that legitimately shell out via these tools
+detection:
+  selection:
+    process.cmdline|contains:
+      - "-exec /bin/sh"
+      - "-exec /bin/bash"
+      - "-exec sh "
+      - "awk 'BEGIN{system("
+      - "awk \"BEGIN{system("
+      - "nmap --interactive"
+      - "--checkpoint-action=exec"
+      - "os.system("
+      - "pty.spawn"
+      - "perl -e 'exec"
+      - "vim -c ':!"
+      - "vi -c ':!"
+      - "env /bin/sh"
+      - "ldconfig -p"
+  condition: selection

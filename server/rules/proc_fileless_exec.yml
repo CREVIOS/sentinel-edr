@@ -1,0 +1,21 @@
+id: proc-fileless-exec
+title: Fileless / in-memory execution
+status: stable
+description: >
+  Detects execution from an anonymous memory file (memfd_create) or from a binary
+  whose on-disk image was deleted — both hallmarks of fileless malware that never
+  touches a persistent path on disk.
+severity: critical
+category: process
+mitre:
+  - T1620
+tactic: Defense Evasion
+auto_respond: kill_process
+falsepositives:
+  - Some self-updating packagers briefly run from a deleted image
+detection:
+  selection:
+    process.exe|contains:
+      - "memfd:"
+      - "(deleted)"
+  condition: selection

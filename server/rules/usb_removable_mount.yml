@@ -1,0 +1,19 @@
+id: usb-removable-mount
+title: Removable media mounted
+status: stable
+description: >
+  A filesystem was mounted under a removable-media path (/media, /mnt, /run/media,
+  /Volumes). Removable media is a primary data-exfiltration and malware-ingress
+  channel; correlate with subsequent file writes / DLP hits on that mount.
+severity: medium
+category: usb
+mitre:
+  - T1052.001
+  - T1200
+tactic: Exfiltration
+falsepositives:
+  - Routine use of approved removable drives
+detection:
+  selection:
+    action: mount
+  condition: selection

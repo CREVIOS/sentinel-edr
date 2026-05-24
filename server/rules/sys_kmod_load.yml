@@ -1,0 +1,18 @@
+id: sys-kmod-load
+title: Kernel module loaded
+status: stable
+description: >
+  A kernel module was loaded after the agent started. Legitimate on hosts that
+  hot-plug hardware, but also the primary persistence/stealth vector for Linux
+  rootkits (LKM rootkits, eBPF-loader shims). Review the module name.
+severity: medium
+category: system
+mitre:
+  - T1547.006
+tactic: Persistence
+falsepositives:
+  - Hardware hot-plug, on-demand filesystem/crypto modules, driver installs
+detection:
+  selection:
+    action: kmod_load
+  condition: selection

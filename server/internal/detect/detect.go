@@ -454,6 +454,8 @@ func flatten(ev *model.Event) map[string][]string {
 		put("process.pid", strconv.Itoa(p.PID))
 		put("process.ppid", strconv.Itoa(p.PPID))
 		put("process.uid", strconv.Itoa(p.UID))
+		put("process.lineage", p.Lineage)
+		put("process.container", p.Container)
 	}
 	if fi := ev.File; fi != nil {
 		put("file.path", fi.Path)
@@ -489,6 +491,11 @@ func flatten(ev *model.Event) map[string][]string {
 		put("dlp.classifier", d.Classifier)
 		put("dlp.channel", d.Channel)
 		put("dlp.verdict", d.Verdict)
+	}
+	for k, v := range ev.Extra {
+		for _, s := range toStringList(v) {
+			put("extra."+k, s)
+		}
 	}
 	return f
 }

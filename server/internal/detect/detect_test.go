@@ -50,6 +50,44 @@ func TestDownloadExecDetected(t *testing.T) {
 	}
 }
 
+func TestGtfobinsDetected(t *testing.T) {
+	e := loadEngine(t)
+	ev := &model.Event{
+		Category: model.CatProcess, Action: "exec",
+		Process: &model.Process{Name: "find", Cmdline: "find . -exec /bin/sh -p \\; -quit"},
+	}
+	if !firedIDs(e.Eval(ev))["proc-gtfobins"] {
+		t.Fatalf("expected proc-gtfobins to fire")
+	}
+}
+
+func TestFilelessExecDetected(t *testing.T) {
+	e := loadEngine(t)
+	ev := &model.Event{
+		Category: model.CatProcess, Action: "exec",
+		Process: &model.Process{Name: "x", Exe: "/memfd:payload (deleted)"},
+	}
+	if !firedIDs(e.Eval(ev))["proc-fileless-exec"] {
+		t.Fatalf("expected proc-fileless-exec to fire")
+	}
+}
+
+func TestKmodLoadDetected(t *testing.T) {
+	e := loadEngine(t)
+	ev := &model.Event{Category: model.CatSystem, Action: "kmod_load", Message: "kernel module loaded: evil_rk"}
+	if !firedIDs(e.Eval(ev))["sys-kmod-load"] {
+		t.Fatalf("expected sys-kmod-load to fire")
+	}
+}
+
+func TestRemovableMountDetected(t *testing.T) {
+	e := loadEngine(t)
+	ev := &model.Event{Category: model.CatUSB, Action: "mount", USB: &model.USBInfo{Action: "mount", Mount: "/media/usb0"}}
+	if !firedIDs(e.Eval(ev))["usb-removable-mount"] {
+		t.Fatalf("expected usb-removable-mount to fire")
+	}
+}
+
 func TestWebserverShellRequiresBothSelections(t *testing.T) {
 	e := loadEngine(t)
 	// parent nginx + child bash => fire

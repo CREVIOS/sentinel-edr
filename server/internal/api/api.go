@@ -266,11 +266,37 @@ func (s *Server) agentWS(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("agent disconnected", "agent", agentID)
 	}()
 	conn.SetReadLimit(1 << 16)
+	// Half-open detection: ping the agent periodically and require a pong within pongWait.
+	// Without this a network partition leaves this goroutine blocked in ReadMessage forever,
+	// leaking a goroutine + DB connection per dead agent across the fleet.
+	const pongWait = 120 * time.Second
+	const pingEvery = 45 * time.Second
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		t := time.NewTicker(pingEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				if !s.hub.PingAgent(agentID) {
+					return
+				}
+			}
+		}
+	}()
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			return
 		}
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		var res model.CommandResult
 		if json.Unmarshal(data, &res) == nil && res.ID != "" {
 			s.hub.DeliverResult(res)
@@ -465,10 +491,14 @@ func (s *Server) setDetectionStatus(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	d, _ := s.store.GetDetection(r.PathValue("id"))
-	if d != nil {
-		s.bcast.Broadcast("detection", d)
+	d, err := s.store.GetDetection(r.PathValue("id"))
+	if err != nil || d == nil {
+		// The update committed; only the re-fetch failed. Acknowledge success without a
+		// null body so callers don't dereference nil.
+		writeJSON(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "status": string(st)})
+		return
 	}
+	s.bcast.Broadcast("detection", d)
 	writeJSON(w, http.StatusOK, d)
 }
 
@@ -648,6 +678,9 @@ func securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
+		// HSTS is honored only over HTTPS (ignored on plain HTTP per spec), so setting it
+		// unconditionally is safe and protects TLS deployments from SSL-stripping.
+		h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 		h.Set("Content-Security-Policy",

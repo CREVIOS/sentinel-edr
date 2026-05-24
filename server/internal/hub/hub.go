@@ -20,7 +20,7 @@ type Message struct {
 // Hub fans out messages to consoles and routes commands to agents.
 type Hub struct {
 	mu        sync.RWMutex
-	consoles  map[*websocket.Conn]bool
+	consoles  map[*websocket.Conn]*sync.Mutex // value = per-conn write lock
 	agents    map[string]*agentConn
 	pending   map[string]chan model.CommandResult
 	pendingMu sync.Mutex
@@ -34,7 +34,7 @@ type agentConn struct {
 // New creates an empty hub.
 func New() *Hub {
 	return &Hub{
-		consoles: map[*websocket.Conn]bool{},
+		consoles: map[*websocket.Conn]*sync.Mutex{},
 		agents:   map[string]*agentConn{},
 		pending:  map[string]chan model.CommandResult{},
 	}
@@ -43,7 +43,7 @@ func New() *Hub {
 // AddConsole registers a console websocket.
 func (h *Hub) AddConsole(c *websocket.Conn) {
 	h.mu.Lock()
-	h.consoles[c] = true
+	h.consoles[c] = &sync.Mutex{}
 	h.mu.Unlock()
 }
 
@@ -87,16 +87,25 @@ func (h *Hub) Broadcast(typ string, data any) {
 	if err != nil {
 		return
 	}
+	type target struct {
+		c  *websocket.Conn
+		wl *sync.Mutex
+	}
 	h.mu.RLock()
-	conns := make([]*websocket.Conn, 0, len(h.consoles))
-	for c := range h.consoles {
-		conns = append(conns, c)
+	conns := make([]target, 0, len(h.consoles))
+	for c, wl := range h.consoles {
+		conns = append(conns, target{c, wl})
 	}
 	h.mu.RUnlock()
-	for _, c := range conns {
-		_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if err := c.WriteMessage(websocket.TextMessage, b); err != nil {
-			h.RemoveConsole(c)
+	for _, t := range conns {
+		// Serialize writes per console — concurrent Broadcast calls (pipeline + correlator +
+		// API) would otherwise write the same socket simultaneously (gorilla panics on that).
+		t.wl.Lock()
+		_ = t.c.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		err := t.c.WriteMessage(websocket.TextMessage, b)
+		t.wl.Unlock()
+		if err != nil {
+			h.RemoveConsole(t.c)
 		}
 	}
 }
@@ -133,6 +142,22 @@ func (h *Hub) SendCommand(agentID string, cmd model.Command, timeout time.Durati
 	case <-time.After(timeout):
 		return model.CommandResult{ID: cmd.ID, OK: false, Message: "agent timeout"}, false
 	}
+}
+
+// PingAgent sends a WebSocket ping to an agent (serialized with command writes via the
+// per-agent lock). Used to detect half-open connections so dead agent goroutines don't leak.
+func (h *Hub) PingAgent(id string) bool {
+	h.mu.RLock()
+	a, ok := h.agents[id]
+	h.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	a.mu.Lock()
+	_ = a.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	err := a.conn.WriteMessage(websocket.PingMessage, nil)
+	a.mu.Unlock()
+	return err == nil
 }
 
 // DeliverResult routes an agent's command reply back to the waiting caller.

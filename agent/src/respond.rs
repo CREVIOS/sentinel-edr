@@ -136,15 +136,21 @@ impl Responder {
     }
 
     fn unisolate(&self) -> Result<String, String> {
-        self.flags.isolated.store(false, Ordering::SeqCst);
         #[cfg(target_os = "linux")]
         {
-            // delete only OUR tables; never touch the host's global ruleset
-            let _ = nft(&["delete", "table", "inet", "sentinel"]);
+            // delete only OUR table; never touch the host's global ruleset
+            let _ = nft(&["delete", "table", "inet", "sentinel"]); // ok if already absent
+            // Only clear the flag once the table is verifiably gone — otherwise telemetry
+            // would claim the host is un-isolated while traffic is still blocked.
+            if verify_nft_table("sentinel").is_ok() {
+                return Err("failed to remove isolation table (still present)".into());
+            }
+            self.flags.isolated.store(false, Ordering::SeqCst);
             Ok("endpoint isolation lifted".into())
         }
         #[cfg(not(target_os = "linux"))]
         {
+            self.flags.isolated.store(false, Ordering::SeqCst);
             Ok("isolation flag cleared".into())
         }
     }
@@ -307,8 +313,21 @@ fn nft(args: &[&str]) -> Result<(), String> {
 
 #[cfg(target_os = "linux")]
 fn apply_nft(ruleset: &str, name: &str) -> Result<String, String> {
-    let path = std::env::temp_dir().join(name);
-    std::fs::write(&path, ruleset).map_err(|e| format!("write ruleset: {e}"))?;
+    use std::os::unix::fs::OpenOptionsExt;
+    // Unpredictable name + O_EXCL + 0600: /tmp is world-writable, so a fixed path could be
+    // symlink/replace-raced between write and `nft -f` to subvert the isolation ruleset.
+    let stem = name.trim_end_matches(".nft");
+    let path = std::env::temp_dir().join(format!("{stem}-{}.nft", uuid::Uuid::new_v4()));
+    {
+        let mut f = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("create ruleset: {e}"))?;
+        f.write_all(ruleset.as_bytes())
+            .map_err(|e| format!("write ruleset: {e}"))?;
+    }
     let out = Command::new("nft")
         .arg("-f")
         .arg(&path)

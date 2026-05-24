@@ -261,6 +261,26 @@ fn host_only(url: &str) -> String {
 /// A future that resolves on SIGINT/SIGTERM.
 fn signal_stream() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async {
-        let _ = tokio::signal::ctrl_c().await;
+        // Handle SIGTERM too — that's what `systemctl stop` sends; without it the agent is
+        // hard-killed and never runs its graceful-shutdown path.
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut term = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(_) => {
+                    let _ = tokio::signal::ctrl_c().await;
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
     })
 }

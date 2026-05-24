@@ -5,12 +5,16 @@
 package bus
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 )
 
 // SubjectEvents is the subject raw events are published to.
 const SubjectEvents = "events.raw"
+
+// errBusClosed is returned by Publish after the bus has been closed.
+var errBusClosed = errors.New("bus: closed")
 
 // Handler processes one message body. Returning an error means the message should be retried
 // by durable buses that support explicit acknowledgement.
@@ -55,6 +59,10 @@ func newMemoryBus() *memoryBus {
 
 func (m *memoryBus) Publish(subject string, data []byte) error {
 	m.mu.RLock()
+	if m.closed {
+		m.mu.RUnlock()
+		return errBusClosed
+	}
 	var groups []*consumerGroup
 	for key, g := range m.consumers {
 		if hasPrefix(key, subject+"|") {

@@ -142,8 +142,17 @@ async fn serve_commands(
                 };
                 info!(kind = %cmd.kind, "command received");
                 let res: CommandResult = responder.execute(&cmd);
-                let body = serde_json::to_string(&res)?;
-                write.send(Message::Text(body)).await?;
+                let body = serde_json::to_string(&res).unwrap_or_default();
+                // The action has ALREADY been applied (and locally audited). If delivering the
+                // result fails, log it distinctly — don't let it look like a generic channel
+                // error — then reconnect. The server may time out and re-issue; containment
+                // actions are idempotent (re-isolate, re-kill of a dead pid, re-lock) so a
+                // replay is safe.
+                if let Err(e) = write.send(Message::Text(body)).await {
+                    warn!(error = %e, kind = %cmd.kind,
+                        "command applied but result delivery failed; reconnecting");
+                    break;
+                }
             }
             Message::Ping(p) => write.send(Message::Pong(p)).await?,
             Message::Close(_) => break,

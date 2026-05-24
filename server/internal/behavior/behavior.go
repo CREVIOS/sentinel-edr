@@ -23,6 +23,8 @@ type Engine struct {
 
 	// de-dupe so we don't fire the same correlation every event
 	fired map[string]time.Time
+
+	lastGC time.Time // throttles map eviction
 }
 
 type window struct {
@@ -61,6 +63,7 @@ func (e *Engine) Observe(ev *model.Event) []*model.Detection {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
+	e.gc(now)
 	var out []*model.Detection
 
 	switch ev.Category {
@@ -120,6 +123,36 @@ func (e *Engine) Observe(ev *model.Event) []*model.Detection {
 		}
 	}
 	return out
+}
+
+// gc evicts windows/keys that can no longer contribute to a detection, so the maps stay
+// bounded by *active* entities rather than growing for the life of the process (a busy jump
+// host sees thousands of distinct source IPs / domains over weeks of uptime). Throttled.
+func (e *Engine) gc(now time.Time) {
+	if !e.lastGC.IsZero() && now.Sub(e.lastGC) < time.Minute {
+		return
+	}
+	e.lastGC = now
+	sweep := func(m map[string][]time.Time, w time.Duration) {
+		for k, ts := range m {
+			if len(prune(ts, now, w)) == 0 {
+				delete(m, k)
+			}
+		}
+	}
+	sweep(e.failedAuth, bruteForceWindow)
+	sweep(e.usbWrites, usbCopyWindow)
+	sweep(e.conns, beaconWindow)
+	for k, w := range e.egress {
+		if now.Sub(w.start) > exfilWindow {
+			delete(e.egress, k)
+		}
+	}
+	for k, t := range e.fired {
+		if now.Sub(t) > refire {
+			delete(e.fired, k)
+		}
+	}
 }
 
 func (e *Engine) canFire(key string, now time.Time) bool {

@@ -27,6 +27,7 @@ type Config struct {
 	TLSClientCA    string // path to CA that signs agent client certs (enables mTLS)
 	BehindProxy    bool   // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
 	RulesDir       string // directory of Sigma-style YAML rules
+	IOCDir         string // directory of threat-intel IOC feed files (hash/ip/domain)
 	WebDir         string // optional external dir for the built console (else embedded)
 	Correlate      bool   // worker also runs behavioral correlation
 	AllowOrigins   []string
@@ -51,6 +52,7 @@ func Load() *Config {
 		TLSKey:       env("SENTINEL_TLS_KEY", ""),
 		TLSClientCA:  env("SENTINEL_TLS_CLIENT_CA", ""),
 		RulesDir:     env("SENTINEL_RULES_DIR", "rules"),
+		IOCDir:       env("SENTINEL_IOC_DIR", "intel/feeds"),
 		WebDir:       env("SENTINEL_WEB_DIR", ""),
 		Correlate:    env("SENTINEL_CORRELATE", "true") != "false",
 		BehindProxy:  env("SENTINEL_BEHIND_PROXY", "") == "true",

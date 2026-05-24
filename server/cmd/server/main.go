@@ -24,6 +24,7 @@ import (
 	"github.com/sentinel/server/internal/detect"
 	"github.com/sentinel/server/internal/dlp"
 	"github.com/sentinel/server/internal/hub"
+	"github.com/sentinel/server/internal/intel"
 	"github.com/sentinel/server/internal/mesh"
 	"github.com/sentinel/server/internal/pipeline"
 	"github.com/sentinel/server/internal/respond"
@@ -65,6 +66,16 @@ func main() {
 	}
 	dlpEng := dlp.New()
 
+	// Threat-intel IOC engine (optional). Loads hash/ip/domain feeds from SENTINEL_IOC_DIR.
+	intelEng := intel.New()
+	if cfg.IOCDir != "" {
+		if n, err := intelEng.LoadDir(cfg.IOCDir); err != nil {
+			log.Warn("ioc feeds", "err", err, "dir", cfg.IOCDir)
+		} else {
+			log.Info("ioc feeds loaded", "indicators", n)
+		}
+	}
+
 	busB, err := bus.Open(cfg.NatsURL)
 	if err != nil {
 		log.Error("bus", "err", err)
@@ -96,7 +107,7 @@ func main() {
 	if cfg.Correlate && cfg.RunsRole("correlator") {
 		behaviorEng = behavior.New()
 	}
-	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log)
+	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).WithIntel(intelEng)
 
 	if cfg.RunsRole("worker") {
 		if err := proc.StartProcessors(busB); err != nil {

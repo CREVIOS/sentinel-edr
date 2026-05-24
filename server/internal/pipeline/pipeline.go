@@ -16,6 +16,7 @@ import (
 	"github.com/sentinel/server/internal/bus"
 	"github.com/sentinel/server/internal/detect"
 	"github.com/sentinel/server/internal/dlp"
+	"github.com/sentinel/server/internal/intel"
 	"github.com/sentinel/server/internal/model"
 	"github.com/sentinel/server/internal/respond"
 	"github.com/sentinel/server/internal/store"
@@ -30,6 +31,7 @@ type Processor struct {
 	behavior *behavior.Engine
 	respond  *respond.Orchestrator
 	bcast    transport.Broadcaster
+	intel    *intel.Engine
 	log      *slog.Logger
 }
 
@@ -37,6 +39,9 @@ type Processor struct {
 func New(s store.Store, d *detect.Engine, dl *dlp.Engine, b *behavior.Engine, r *respond.Orchestrator, bc transport.Broadcaster, log *slog.Logger) *Processor {
 	return &Processor{store: s, detect: d, dlp: dl, behavior: b, respond: r, bcast: bc, log: log}
 }
+
+// WithIntel attaches a threat-intel (IOC) engine. Optional; nil → no IOC matching.
+func (p *Processor) WithIntel(e *intel.Engine) *Processor { p.intel = e; return p }
 
 // StartProcessors subscribes the stateless detection/DLP consumer (queue group).
 func (p *Processor) StartProcessors(b bus.Bus) error {
@@ -84,6 +89,14 @@ func (p *Processor) processStateless(ev model.Event) error {
 	for _, d := range p.detect.Eval(&ev) {
 		if err := p.emit(d, &ev, p.detect.AutoRespondFor(d.RuleID)); err != nil {
 			errs = append(errs, err)
+		}
+	}
+	// Threat-intel IOC matching (hash/ip/domain) — emits its own detections.
+	if p.intel != nil {
+		for _, d := range p.intel.Match(&ev) {
+			if err := p.emit(d, &ev, ""); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	if err := p.runDLP(&ev); err != nil {

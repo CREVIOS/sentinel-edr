@@ -12,7 +12,8 @@ FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/sentinel-server /app/sentinel-server
 COPY server/rules /app/rules
-ENV SENTINEL_RULES_DIR=/app/rules
+COPY server/intel/feeds /app/intel/feeds
+ENV SENTINEL_RULES_DIR=/app/rules SENTINEL_IOC_DIR=/app/intel/feeds
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/app/sentinel-server"]

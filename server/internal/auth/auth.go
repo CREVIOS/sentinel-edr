@@ -183,12 +183,15 @@ func bearer(r *http.Request) string {
 
 // ---------- per-IP rate limiter ----------
 
-// Limiter is a simple token-bucket limiter keyed by client IP.
+// Limiter is a simple token-bucket limiter keyed by client IP. The bucket map is bounded:
+// idle buckets are swept and a hard key cap prevents memory-exhaustion if the key space is
+// flooded (e.g. spoofed source IPs).
 type Limiter struct {
 	mu      sync.Mutex
 	buckets map[string]*bucket
 	rate    float64 // tokens per second
 	burst   float64
+	lastGC  time.Time
 }
 
 type bucket struct {
@@ -196,17 +199,42 @@ type bucket struct {
 	last   time.Time
 }
 
+const (
+	limiterIdleTTL = 10 * time.Minute // forget a key after this much inactivity
+	limiterGCEvery = time.Minute      // sweep cadence
+	limiterMaxKeys = 100_000          // hard cap on distinct keys held at once
+)
+
 // NewLimiter creates a limiter allowing `burst` requests with `rate` refill/sec.
 func NewLimiter(rate, burst float64) *Limiter {
-	return &Limiter{buckets: map[string]*bucket{}, rate: rate, burst: burst}
+	return &Limiter{buckets: map[string]*bucket{}, rate: rate, burst: burst, lastGC: time.Now()}
+}
+
+// gc evicts idle buckets (caller holds the lock). Runs at most once per limiterGCEvery, or
+// immediately when the key cap is hit. If still over cap after sweeping, the map is reset —
+// a coarse but safe backstop against unbounded growth under a flood.
+func (l *Limiter) gc(now time.Time) {
+	if now.Sub(l.lastGC) < limiterGCEvery && len(l.buckets) < limiterMaxKeys {
+		return
+	}
+	l.lastGC = now
+	for k, b := range l.buckets {
+		if now.Sub(b.last) > limiterIdleTTL {
+			delete(l.buckets, k)
+		}
+	}
+	if len(l.buckets) > limiterMaxKeys {
+		l.buckets = map[string]*bucket{}
+	}
 }
 
 // Allow reports whether a request from key may proceed.
 func (l *Limiter) Allow(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	b := l.buckets[key]
 	now := time.Now()
+	l.gc(now)
+	b := l.buckets[key]
 	if b == nil {
 		l.buckets[key] = &bucket{tokens: l.burst - 1, last: now}
 		return true

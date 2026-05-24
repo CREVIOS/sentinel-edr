@@ -73,7 +73,10 @@ pub fn scan(text: &str) -> Vec<Finding> {
             }
             count += 1;
             if sample.is_empty() {
-                sample = redact(s);
+                // Fully mask PII/PAN at the source so no partial value is ever persisted to
+                // the DB / console / SIEM. Other classifiers keep a first-2/last-2 hint.
+                let full = matches!(p.name, "pci_card" | "pii_ssn");
+                sample = redact(s, full);
             }
         }
         if count > 0 {
@@ -110,11 +113,11 @@ fn luhn_valid(s: &str) -> bool {
     sum % 10 == 0
 }
 
-fn redact(s: &str) -> String {
+fn redact(s: &str, full: bool) -> String {
     // Operate on chars, not bytes — byte slicing panics on multibyte UTF-8.
     let chars: Vec<char> = s.chars().collect();
     let n = chars.len();
-    if n <= 4 {
+    if full || n <= 4 {
         return "*".repeat(n);
     }
     let head: String = chars[..2].iter().collect();

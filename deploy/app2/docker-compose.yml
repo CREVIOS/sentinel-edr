@@ -37,7 +37,9 @@ services:
     image: nats:2
     container_name: sentinel-nats
     restart: unless-stopped
-    command: ["-js", "-m", "8222"]
+    # Token auth required; monitor port (8222) dropped. Event bus + command mesh both carry
+    # containment commands, so the bus must not be open to any process that can reach it.
+    command: ["-js", "--auth", "${NATS_TOKEN}"]
     # nats:2 image has no shell/wget for a healthcheck; the server retries the connection.
     networks: [internal]
 
@@ -59,14 +61,17 @@ services:
       SENTINEL_ALLOW_ORIGINS: https://app2.makebell.com
       SENTINEL_ROLE: all
       SENTINEL_DATABASE_URL: postgres://sentinel:${PGPW}@timescaledb:5432/sentinel?sslmode=disable
-      SENTINEL_NATS_URL: nats://nats:4222
+      SENTINEL_NATS_URL: nats://${NATS_TOKEN}@nats:4222
       SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET}
       SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN}
       SENTINEL_ADMIN_USER: ${SENTINEL_ADMIN_USER}
       SENTINEL_ADMIN_PASS: ${SENTINEL_ADMIN_PASS}
       SENTINEL_TRUSTED_PROXIES: 172.16.0.0/12,10.0.0.0/8
-    # global-proxy so the host nginx can reach the agent ingest API + command WS.
-    networks: [internal, global-proxy]
+    # NOT on global-proxy: :8080 serves console/respond/login/ws too, which must not be
+    # reachable by co-tenant containers on the shared network. The host nginx instead joins
+    # sentinel_internal (one-time: `docker network connect sentinel_internal <nginx>`), so it
+    # can proxy the public enroll/events/agent routes without exposing the rest.
+    networks: [internal]
 
   # Better Auth migrations run out-of-band in build-dashboard.sh (memory-capped docker run),
   # not as a compose service — the in-image build that a migrate service needs is OOM-killed

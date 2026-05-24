@@ -692,7 +692,16 @@ func (s *Server) clientIP(r *http.Request, fallback string) string {
 	remote := remoteHost(r.RemoteAddr)
 	if remote != "" && trustedProxy(remote, s.cfg.TrustedProxies) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if ip := strings.TrimSpace(strings.Split(xff, ",")[0]); ip != "" {
+			// nginx APPENDS the real peer to any client-supplied XFF, so the leftmost entry is
+			// attacker-controlled. Walk right→left, skipping trusted proxies; the first
+			// untrusted hop is the genuine client. This prevents XFF spoofing (which would let
+			// an attacker mint unbounded rate-limiter buckets → memory-exhaustion DoS).
+			parts := strings.Split(xff, ",")
+			for i := len(parts) - 1; i >= 0; i-- {
+				ip := strings.TrimSpace(parts[i])
+				if ip == "" || trustedProxy(ip, s.cfg.TrustedProxies) {
+					continue
+				}
 				return ip
 			}
 		}

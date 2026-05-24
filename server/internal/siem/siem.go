@@ -94,13 +94,30 @@ func cefExt(kv map[string]string) string {
 }
 
 func cefEscape(s string) string {
+	s = stripCtrl(s)
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	return strings.ReplaceAll(s, "|", `\|`)
 }
 func cefEscapeVal(s string) string {
+	s = stripCtrl(s)
 	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, "=", `\=`)
-	return strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "=", `\=`)
+}
+
+// stripCtrl neutralizes control characters in attacker-controllable fields before they enter
+// a CEF/syslog line. Newlines AND carriage returns become spaces (a lone \r could otherwise
+// inject a forged log line downstream); other control chars are dropped entirely.
+func stripCtrl(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case r < 0x20 || r == 0x7f:
+			return -1
+		default:
+			return r
+		}
+	}, s)
 }
 
 // EventECS renders one event as an ECS JSON document.

@@ -8,7 +8,7 @@ import { SentinelMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, ArrowRight, Radar, FileLock2, Crosshair, ShieldCheck } from "lucide-react";
+import { Loader2, ArrowRight, Radar, FileLock2, Crosshair, ShieldCheck, Eye, EyeOff } from "lucide-react";
 
 const FEATURES = [
   { icon: Radar, title: "Endpoint EDR", desc: "Process, file, auth, USB & network telemetry in real time." },
@@ -24,6 +24,7 @@ export default function LoginPage() {
   const [err, setErr] = useState("");
   const [twoFA, setTwoFA] = useState(false);
   const [code, setCode] = useState("");
+  const [showPw, setShowPw] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -118,7 +119,18 @@ export default function LoginPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="pw" className="text-xs text-muted-foreground">Passphrase</Label>
-                  <Input id="pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+                  <div className="relative">
+                    <Input id="pw" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required className="pr-10" />
+                    <button
+                      type="button"
+                      onClick={() => setShowPw((v) => !v)}
+                      tabIndex={-1}
+                      aria-label={showPw ? "Hide passphrase" : "Show passphrase"}
+                      className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition-colors hover:text-primary"
+                    >
+                      {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
                 </div>
                 <Button type="submit" className="w-full" disabled={busy}>
                   {busy ? <Loader2 className="size-4 animate-spin" /> : <>Sign in <ArrowRight className="size-4" /></>}

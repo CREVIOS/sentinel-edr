@@ -11,6 +11,13 @@ export function proxy(req: NextRequest) {
     return NextResponse.json({ error: "self-registration disabled" }, { status: 403 });
   }
 
+  // In development Next/Turbopack/HMR + next-themes need eval() and inline bootstrap scripts,
+  // which a strict nonce CSP forbids — so the hardened CSP is PRODUCTION-ONLY. The production
+  // build emits no eval/inline, so the nonce policy holds there.
+  if (process.env.NODE_ENV !== "production") {
+    return NextResponse.next();
+  }
+
   // Web Crypto (Edge runtime has no Buffer); base64 nonce.
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);

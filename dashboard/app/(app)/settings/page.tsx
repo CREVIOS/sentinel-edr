@@ -14,6 +14,7 @@ import { useSession, signOut, authClient } from "@/lib/auth-client";
 import { useData } from "@/lib/use-data";
 import { compact } from "@/lib/format";
 import type { Overview } from "@/lib/types";
+import { TwoFactor } from "@/components/two-factor";
 import {
   Activity, Database, Cpu, Radio, Download, Copy, KeyRound, LogOut, Sun, Moon,
   ShieldCheck, Server, Loader2, CheckCircle2, AlertTriangle,
@@ -149,6 +150,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
           <ChangePassword />
+          <TwoFactor />
         </TabsContent>
 
         {/* AGENTS */}

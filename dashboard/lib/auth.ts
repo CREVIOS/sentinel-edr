@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { twoFactor } from "better-auth/plugins";
 import { Pool } from "pg";
 
 // Better Auth owns console authentication (email + password), persisting its own tables
@@ -22,6 +23,10 @@ export const auth = betterAuth({
       role: { type: "string", required: false, defaultValue: "viewer", input: false },
     },
   },
+  plugins: [
+    // TOTP two-factor (authenticator app) + backup codes. Operators self-enable in Settings.
+    twoFactor({ issuer: "Sentinel" }),
+  ],
 });
 
 export type Session = typeof auth.$Infer.Session;

@@ -3,12 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { signIn } from "@/lib/auth-client";
+import { signIn, twoFactor } from "@/lib/auth-client";
 import { SentinelMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, ArrowRight, Radar, FileLock2, Crosshair } from "lucide-react";
+import { Loader2, ArrowRight, Radar, FileLock2, Crosshair, ShieldCheck } from "lucide-react";
 
 const FEATURES = [
   { icon: Radar, title: "Endpoint EDR", desc: "Process, file, auth, USB & network telemetry in real time." },
@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [twoFA, setTwoFA] = useState(false);
+  const [code, setCode] = useState("");
 
   useEffect(() => { fetch("/api/bootstrap").catch(() => {}); }, []);
 
@@ -29,10 +31,22 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     setErr("");
-    const { error } = await signIn.email({ email, password });
+    const { data, error } = await signIn.email({ email, password });
     setBusy(false);
-    if (error) { setErr(error.message || "Authentication failed"); toast.error("Authentication failed"); }
-    else { toast.success("Welcome back"); router.push("/"); }
+    if (error) { setErr(error.message || "Authentication failed"); toast.error("Authentication failed"); return; }
+    // 2FA enabled → no session yet; challenge for the TOTP code.
+    if ((data as { twoFactorRedirect?: boolean })?.twoFactorRedirect) { setTwoFA(true); return; }
+    toast.success("Welcome back"); router.push("/");
+  }
+
+  async function verify2fa(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr("");
+    const { error } = await twoFactor.verifyTotp({ code });
+    setBusy(false);
+    if (error) { setErr(error.message || "Invalid code"); toast.error("Invalid code"); return; }
+    toast.success("Welcome back"); router.push("/");
   }
 
   return (
@@ -79,24 +93,43 @@ export default function LoginPage() {
             <span className="font-mono text-base font-semibold tracking-[0.3em]">SENTINEL</span>
           </div>
 
-          <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
-          <p className="mb-7 mt-1.5 text-sm text-muted-foreground">Authenticate to the command console.</p>
-
-          <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="email" className="text-xs text-muted-foreground">Operator email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pw" className="text-xs text-muted-foreground">Passphrase</Label>
-              <Input id="pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
-            </div>
-            <Button type="submit" className="w-full" disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <>Sign in <ArrowRight className="size-4" /></>}
-            </Button>
-            {err && <p className="text-sm text-destructive">{err}</p>}
-          </form>
-          <p className="mt-7 font-mono text-[11px] text-muted-foreground">dev · admin@sentinel.local / sentinel-admin</p>
+          {twoFA ? (
+            <>
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><ShieldCheck className="size-6 text-primary" /> Verify</h1>
+              <p className="mb-7 mt-1.5 text-sm text-muted-foreground">Enter the 6-digit code from your authenticator app.</p>
+              <form onSubmit={verify2fa} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="code" className="text-xs text-muted-foreground">Authentication code</Label>
+                  <Input id="code" inputMode="numeric" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" required />
+                </div>
+                <Button type="submit" className="w-full" disabled={busy}>
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <>Verify <ArrowRight className="size-4" /></>}
+                </Button>
+                {err && <p className="text-sm text-destructive">{err}</p>}
+              </form>
+              <button onClick={() => { setTwoFA(false); setCode(""); setErr(""); }} className="mt-4 text-xs text-muted-foreground hover:text-foreground">← back</button>
+            </>
+          ) : (
+            <>
+              <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
+              <p className="mb-7 mt-1.5 text-sm text-muted-foreground">Authenticate to the command console.</p>
+              <form onSubmit={submit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-xs text-muted-foreground">Operator email</Label>
+                  <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pw" className="text-xs text-muted-foreground">Passphrase</Label>
+                  <Input id="pw" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required />
+                </div>
+                <Button type="submit" className="w-full" disabled={busy}>
+                  {busy ? <Loader2 className="size-4 animate-spin" /> : <>Sign in <ArrowRight className="size-4" /></>}
+                </Button>
+                {err && <p className="text-sm text-destructive">{err}</p>}
+              </form>
+              <p className="mt-7 font-mono text-[11px] text-muted-foreground">dev · admin@sentinel.local / sentinel-admin</p>
+            </>
+          )}
         </div>
       </main>
     </div>

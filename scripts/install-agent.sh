@@ -30,6 +30,12 @@ need_root
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"; case "$ARCH" in x86_64|amd64) ARCH=x86_64;; aarch64|arm64) ARCH=aarch64;; esac
 
+# If no explicit binary source, default to the server's /dl directory so a single
+# `SENTINEL_SERVER + SENTINEL_ENROLL_TOKEN` is enough to install anywhere.
+if [ -z "${SENTINEL_AGENT_BINARY:-}" ] && [ -z "${SENTINEL_RELEASE_URL:-}" ]; then
+  SENTINEL_RELEASE_URL="${SERVER%/}/dl"
+fi
+
 # --- 1) resolve binary ---
 if [ -n "${SENTINEL_AGENT_BINARY:-}" ] && [ -x "$SENTINEL_AGENT_BINARY" ]; then
   log "using provided binary: $SENTINEL_AGENT_BINARY"

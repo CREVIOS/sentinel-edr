@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/command";
 import {
   LayoutDashboard, ShieldAlert, Activity, MonitorSmartphone, FileLock2,
-  Globe, Crosshair, ScrollText, Settings, Eye,
+  Globe, Crosshair, ScrollText, Settings, Eye, Search,
 } from "lucide-react";
 
 const NAV = [
@@ -22,8 +22,11 @@ const NAV = [
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
-/** ⌘K / Ctrl-K command palette for fast SOC navigation. Mounted once in the app shell. */
-export function CommandPalette({ trigger }: { trigger?: (open: () => void) => React.ReactNode }) {
+/**
+ * ⌘K / Ctrl-K command palette for fast SOC navigation. Renders its own trigger button so it
+ * can be mounted directly in a server component (no function props across the RSC boundary).
+ */
+export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
@@ -42,7 +45,14 @@ export function CommandPalette({ trigger }: { trigger?: (open: () => void) => Re
 
   return (
     <>
-      {trigger?.(() => setOpen(true))}
+      <button
+        onClick={() => setOpen(true)}
+        className="hidden items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted md:inline-flex"
+      >
+        <Search className="size-3.5" />
+        <span>Jump to…</span>
+        <kbd className="ml-2 rounded border bg-background px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+      </button>
       <CommandDialog open={open} onOpenChange={setOpen}>
         <CommandInput placeholder="Jump to a console…" />
         <CommandList>

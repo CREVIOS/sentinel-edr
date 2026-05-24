@@ -7,7 +7,6 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { CommandPalette } from "@/components/command-palette";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Search } from "lucide-react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -25,18 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <div className="font-mono text-sm">Command Console</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <CommandPalette
-              trigger={(openPalette) => (
-                <button
-                  onClick={openPalette}
-                  className="hidden items-center gap-2 rounded-md border bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted md:inline-flex"
-                >
-                  <Search className="size-3.5" />
-                  <span>Jump to…</span>
-                  <kbd className="ml-2 rounded border bg-background px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
-                </button>
-              )}
-            />
+            <CommandPalette />
             <LiveStatus />
             <Separator orientation="vertical" className="!h-5" />
             <ThemeToggle />

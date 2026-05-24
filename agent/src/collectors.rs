@@ -15,7 +15,7 @@ use std::process::Command;
 
 use regex::Regex;
 use sha2::{Digest, Sha256};
-use sysinfo::{Pid, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessesToUpdate, System, Users};
 use walkdir::WalkDir;
 
 use crate::dlp;
@@ -55,21 +55,30 @@ pub fn categorize_domain(domain: &str) -> &'static str {
 
 pub struct ProcessCollector {
     sys: System,
+    users: Users,
     seen: HashSet<u32>,
     first: bool,
+    ticks: u64,
 }
 
 impl ProcessCollector {
     pub fn new() -> Self {
         ProcessCollector {
             sys: System::new(),
+            users: Users::new_with_refreshed_list(),
             seen: HashSet::new(),
             first: true,
+            ticks: 0,
         }
     }
 
     pub fn poll(&mut self) -> Vec<Event> {
         self.sys.refresh_processes(ProcessesToUpdate::All, true);
+        // Refresh the uid->name table occasionally so new accounts resolve (cheap; not every poll).
+        self.ticks = self.ticks.wrapping_add(1);
+        if self.ticks % 30 == 0 {
+            self.users.refresh_list();
+        }
         let mut out = Vec::new();
         let mut current = HashSet::new();
         // snapshot pid->name for parent lineage
@@ -105,25 +114,31 @@ impl ProcessCollector {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             let name = proc_.name().to_string_lossy().to_string();
+            // Real acting identity (was hardcoded uid 0 / empty user → killed user-scoped rules).
+            let uid_obj = proc_.user_id();
+            let uid: i64 = uid_obj
+                .and_then(|u| u.to_string().parse::<i64>().ok())
+                .unwrap_or(0);
+            let user = uid_obj
+                .and_then(|u| self.users.get_user_by_id(u))
+                .map(|u| u.name().to_string())
+                .unwrap_or_default();
             let sev = if is_suspicious(&name, &cmdline) {
                 "medium"
             } else {
                 "info"
             };
-            let ev = Event::new("process", "exec", sev).msg(format!(
-                "{} executed: {}",
-                name,
-                truncate(&cmdline, 240)
-            ));
-            let mut ev = ev;
+            let mut ev = Event::new("process", "exec", sev)
+                .with_user(&user)
+                .msg(format!("{} executed: {}", name, truncate(&cmdline, 240)));
             ev.process = Some(Process {
                 pid: pidu as i64,
                 ppid: proc_.parent().map(|p| p.as_u32() as i64).unwrap_or(0),
                 name,
                 exe,
                 cmdline,
-                uid: 0,
-                user: String::new(),
+                uid,
+                user,
                 parent,
             });
             out.push(ev);
@@ -360,6 +375,144 @@ fn read_trim(p: &std::path::Path) -> String {
     std::fs::read_to_string(p)
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
+}
+
+// ---------------- removable-media mounts ----------------
+
+/// Watches for filesystems mounted under removable-media paths (USB sticks, SD cards, phones,
+/// FUSE shares mounted there). Complements UsbCollector (which sees the device) by capturing
+/// the actual mount, which is where data exfiltration to removable media happens.
+pub struct MountCollector {
+    seen: HashSet<String>,
+    first: bool,
+}
+
+impl MountCollector {
+    pub fn new() -> Self {
+        MountCollector {
+            seen: HashSet::new(),
+            first: true,
+        }
+    }
+
+    pub fn poll(&mut self) -> Vec<Event> {
+        let mounts = removable_mounts();
+        let current: HashSet<String> = mounts.iter().map(|m| m.key()).collect();
+        let mut out = Vec::new();
+        for m in &mounts {
+            if !self.seen.contains(&m.key()) && !self.first {
+                let mut ev = Event::new("usb", "mount", "medium").msg(format!(
+                    "removable media mounted: {} at {} ({})",
+                    m.device, m.mountpoint, m.fstype
+                ));
+                ev.usb = Some(UsbInfo {
+                    action: "mount".into(),
+                    product: m.device.clone(),
+                    mount: m.mountpoint.clone(),
+                    ..Default::default()
+                });
+                out.push(ev);
+            }
+        }
+        for old in self.seen.difference(&current) {
+            let mp = old.split('\t').nth(1).unwrap_or("").to_string();
+            let mut ev =
+                Event::new("usb", "unmount", "info").msg(format!("removable media unmounted: {mp}"));
+            ev.usb = Some(UsbInfo {
+                action: "unmount".into(),
+                mount: mp,
+                ..Default::default()
+            });
+            out.push(ev);
+        }
+        self.seen = current;
+        self.first = false;
+        out
+    }
+}
+
+struct Mount {
+    device: String,
+    mountpoint: String,
+    fstype: String,
+}
+
+impl Mount {
+    fn key(&self) -> String {
+        format!("{}\t{}", self.device, self.mountpoint)
+    }
+}
+
+/// Mount points considered "removable media" for monitoring purposes.
+const REMOVABLE_PREFIXES: [&str; 4] = ["/media", "/mnt", "/run/media", "/Volumes"];
+
+fn is_removable_mount(mountpoint: &str) -> bool {
+    REMOVABLE_PREFIXES
+        .iter()
+        .any(|p| mountpoint == *p || mountpoint.starts_with(&format!("{p}/")))
+}
+
+/// Parse /proc/mounts text into removable-media mounts. Pure (testable). Octal-escaped spaces
+/// (\040) in paths are decoded; pseudo filesystems are skipped.
+fn parse_proc_mounts(text: &str) -> Vec<Mount> {
+    const PSEUDO: [&str; 8] = [
+        "proc", "sysfs", "tmpfs", "devtmpfs", "cgroup", "cgroup2", "devpts", "mqueue",
+    ];
+    let unescape = |s: &str| s.replace("\\040", " ").replace("\\011", "\t");
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 3 {
+            continue;
+        }
+        let mountpoint = unescape(f[1]);
+        let fstype = f[2].to_string();
+        if PSEUDO.contains(&fstype.as_str()) || !is_removable_mount(&mountpoint) {
+            continue;
+        }
+        out.push(Mount {
+            device: unescape(f[0]),
+            mountpoint,
+            fstype,
+        });
+    }
+    out
+}
+
+fn removable_mounts() -> Vec<Mount> {
+    #[cfg(target_os = "linux")]
+    {
+        return std::fs::read_to_string("/proc/mounts")
+            .map(|t| parse_proc_mounts(&t))
+            .unwrap_or_default();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let out = match Command::new("mount").output() {
+            Ok(o) => o,
+            Err(_) => return Vec::new(),
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut mounts = Vec::new();
+        for line in text.lines() {
+            // "device on /Volumes/Name (fstype, ...)"
+            if let Some((dev, rest)) = line.split_once(" on ") {
+                if let Some((mp, tail)) = rest.split_once(" (") {
+                    if is_removable_mount(mp) {
+                        let fstype = tail.split([',', ')']).next().unwrap_or("").to_string();
+                        mounts.push(Mount {
+                            device: dev.to_string(),
+                            mountpoint: mp.to_string(),
+                            fstype,
+                        });
+                    }
+                }
+            }
+        }
+        return mounts;
+    }
+    #[allow(unreachable_code)]
+    Vec::new()
 }
 
 // ---------------- file integrity monitoring ----------------
@@ -711,9 +864,14 @@ impl NetworkCollector {
         for conn in &conns {
             let key = conn.key();
             if !self.seen.contains(&key) && !self.first {
+                let who = if conn.process.is_empty() {
+                    String::new()
+                } else {
+                    format!(" by {} (pid {})", conn.process, conn.pid)
+                };
                 let mut ev = Event::new("network", "connect", "info").msg(format!(
-                    "outbound {} connection to {}",
-                    conn.proto, conn.remote
+                    "outbound {} connection to {}{}",
+                    conn.proto, conn.remote, who
                 ));
                 ev.network = Some(NetInfo {
                     direction: "outbound".into(),
@@ -721,8 +879,17 @@ impl NetworkCollector {
                     local_addr: conn.local.clone(),
                     remote: conn.remote.clone(),
                     category: conn.category(),
+                    bytes_out: conn.bytes_out,
+                    bytes_in: conn.bytes_in,
                     ..Default::default()
                 });
+                if conn.pid > 0 {
+                    ev.process = Some(Process {
+                        pid: conn.pid,
+                        name: conn.process.clone(),
+                        ..Default::default()
+                    });
+                }
                 out.push(ev);
             }
         }
@@ -732,11 +899,15 @@ impl NetworkCollector {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Conn {
     proto: String,
     local: String,
     remote: String,
+    pid: i64,
+    process: String,
+    bytes_out: i64,
+    bytes_in: i64,
 }
 
 impl Conn {
@@ -752,24 +923,50 @@ impl Conn {
     }
 }
 
+/// Parse ss's process column `users:(("name",pid=1234,fd=5))` → (pid, name). First socket
+/// owner only (the common case). Returns (0, "") when no process info is present.
+fn parse_ss_process(field: &str) -> (i64, String) {
+    let name = field
+        .split_once("((\"")
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(n, _)| n.to_string())
+        .unwrap_or_default();
+    let pid = field
+        .split_once("pid=")
+        .and_then(|(_, rest)| {
+            let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            rest[..end].parse::<i64>().ok()
+        })
+        .unwrap_or(0);
+    (pid, name)
+}
+
+/// Parse `bytes_sent:N` / `bytes_received:N` from an `ss -i` info line → (out, in).
+fn parse_ss_bytes(info: &str) -> (i64, i64) {
+    let field = |k: &str| -> i64 {
+        info.split_once(k)
+            .and_then(|(_, rest)| {
+                let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                rest[..end].parse::<i64>().ok()
+            })
+            .unwrap_or(0)
+    };
+    (field("bytes_sent:"), field("bytes_received:"))
+}
+
 fn established_connections() -> Vec<Conn> {
     #[cfg(target_os = "macos")]
-    let cmd = ("lsof", vec!["-nP", "-iTCP", "-sTCP:ESTABLISHED"]);
-    #[cfg(not(target_os = "macos"))]
-    let cmd = ("ss", vec!["-tunp", "state", "established"]);
-
-    let out = match Command::new(cmd.0).args(&cmd.1).output() {
-        Ok(o) => o,
-        Err(_) => return Vec::new(),
-    };
-    let text = String::from_utf8_lossy(&out.stdout);
-    let mut set: HashMap<String, Conn> = HashMap::new();
-    for line in text
-        .lines()
-        .filter(|l| !l.starts_with("Netid") && !l.starts_with("COMMAND"))
     {
-        #[cfg(target_os = "macos")]
+        let out = match Command::new("lsof")
+            .args(["-nP", "-iTCP", "-sTCP:ESTABLISHED"])
+            .output()
         {
+            Ok(o) => o,
+            Err(_) => return Vec::new(),
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut set: HashMap<String, Conn> = HashMap::new();
+        for line in text.lines().filter(|l| !l.starts_with("COMMAND")) {
             for tok in line.split_whitespace() {
                 if let Some((local, remote)) = tok.split_once("->") {
                     if is_remote(remote) {
@@ -777,32 +974,72 @@ fn established_connections() -> Vec<Conn> {
                             proto: "tcp".into(),
                             local: local.into(),
                             remote: remote.into(),
+                            ..Default::default()
                         };
                         set.insert(c.key(), c);
                     }
                 }
             }
         }
-        #[cfg(not(target_os = "macos"))]
+        return set.into_values().take(50).collect();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // -i adds a per-socket info line (bytes_sent/received); -p adds the owning process.
+        let out = match Command::new("ss")
+            .args(["-tunpi", "state", "established"])
+            .output()
         {
+            Ok(o) => o,
+            Err(_) => return Vec::new(),
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut conns: Vec<Conn> = Vec::new();
+        for line in text.lines() {
+            if line.starts_with("Netid") || line.trim().is_empty() {
+                continue;
+            }
+            // Indented continuation = the `-i` info line for the previous connection.
+            if line.starts_with(char::is_whitespace) {
+                if let Some(last) = conns.last_mut() {
+                    let (o, i) = parse_ss_bytes(line);
+                    last.bytes_out = o;
+                    last.bytes_in = i;
+                }
+                continue;
+            }
             let fields: Vec<&str> = line.split_whitespace().collect();
             if fields.len() < 5 {
                 continue;
             }
-            let proto = fields[0].to_string();
-            let local = fields[3].to_string();
             let remote = fields[4].to_string();
-            if is_remote(&remote) {
-                let c = Conn {
-                    proto,
-                    local,
-                    remote,
-                };
-                set.insert(c.key(), c);
+            if !is_remote(&remote) {
+                continue;
             }
+            let (pid, process) = fields
+                .iter()
+                .find(|f| f.starts_with("users:("))
+                .map(|&f| parse_ss_process(f))
+                .unwrap_or((0, String::new()));
+            conns.push(Conn {
+                proto: fields[0].to_string(),
+                local: fields[3].to_string(),
+                remote,
+                pid,
+                process,
+                bytes_out: 0,
+                bytes_in: 0,
+            });
         }
+        // De-dup by 5-tuple, keep first; cap to avoid floods.
+        let mut set: HashMap<String, Conn> = HashMap::new();
+        for c in conns {
+            set.entry(c.key()).or_insert(c);
+        }
+        return set.into_values().take(50).collect();
     }
-    set.into_values().take(50).collect()
+    #[allow(unreachable_code)]
+    Vec::new()
 }
 
 fn is_remote(addr: &str) -> bool {
@@ -830,4 +1067,51 @@ fn truncate(s: &str, n: usize) -> String {
         end -= 1;
     }
     format!("{}…", &s[..end])
+}
+
+#[cfg(test)]
+mod p0_tests {
+    use super::*;
+
+    #[test]
+    fn ss_process_field_parses_pid_and_name() {
+        let (pid, name) = parse_ss_process(r#"users:(("curl",pid=1234,fd=5))"#);
+        assert_eq!(pid, 1234);
+        assert_eq!(name, "curl");
+        // no process info → zeros
+        assert_eq!(parse_ss_process("-"), (0, String::new()));
+    }
+
+    #[test]
+    fn ss_info_line_parses_bytes() {
+        let line = " cubic wscale:7,7 rto:204 bytes_sent:54321 bytes_acked:54000 bytes_received:678 segs_out:9";
+        let (out, inb) = parse_ss_bytes(line);
+        assert_eq!(out, 54321);
+        assert_eq!(inb, 678);
+    }
+
+    #[test]
+    fn removable_mount_prefixes() {
+        assert!(is_removable_mount("/media/usb0"));
+        assert!(is_removable_mount("/run/media/alice/STICK"));
+        assert!(is_removable_mount("/mnt"));
+        assert!(!is_removable_mount("/"));
+        assert!(!is_removable_mount("/home/alice"));
+    }
+
+    #[test]
+    fn proc_mounts_filters_to_removable() {
+        let text = "\
+proc /proc proc rw 0 0
+/dev/sda1 / ext4 rw 0 0
+/dev/sdb1 /media/usb\\040stick vfat rw 0 0
+tmpfs /mnt/should_skip tmpfs rw 0 0
+/dev/sdc1 /run/media/bob/DATA exfat rw 0 0";
+        let m = parse_proc_mounts(text);
+        // root, proc, and tmpfs are excluded; two removable vfat/exfat mounts remain.
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].mountpoint, "/media/usb stick"); // \040 decoded
+        assert_eq!(m[0].fstype, "vfat");
+        assert_eq!(m[1].mountpoint, "/run/media/bob/DATA");
+    }
 }

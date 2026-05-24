@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
     let mut pkg_c = collectors::PackageCollector::new();
     let mut net_c = collectors::NetworkCollector::new();
     let mut authlog_c = collectors::AuthLogCollector::new();
+    let mut mount_c = collectors::MountCollector::new();
 
     info!(
         interval = cli.interval,
@@ -122,6 +123,7 @@ async fn main() -> Result<()> {
         batch.extend(fim_c.poll());
         batch.extend(net_c.poll());
         batch.extend(authlog_c.poll());
+        batch.extend(mount_c.poll());
         // package scan is heavier; run every ~12 ticks
         pkg_interval += 1;
         if pkg_interval >= 12 {

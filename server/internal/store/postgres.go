@@ -14,7 +14,8 @@ import (
 
 // pgStore is the TimescaleDB (Postgres) backend.
 type pgStore struct {
-	db *sql.DB
+	db    *sql.DB
+	caggs bool // true when the events_hourly continuous aggregate exists (TimescaleDB present)
 }
 
 func openPostgres(dsn string) (*pgStore, error) {
@@ -84,8 +85,28 @@ func (s *pgStore) migrate() error {
 	}
 	// Best-effort retention + compression (ignored on plain Postgres).
 	_, _ = s.db.Exec(`SELECT add_retention_policy('events', INTERVAL '90 days', if_not_exists => TRUE)`)
-	_, _ = s.db.Exec(`ALTER TABLE events SET (timescaledb.compress, timescaledb.compress_segmentby = 'agent_id')`)
+	_, _ = s.db.Exec(`ALTER TABLE events SET (timescaledb.compress, timescaledb.compress_segmentby = 'agent_id', timescaledb.compress_orderby = 'ts DESC')`)
 	_, _ = s.db.Exec(`SELECT add_compression_policy('events', INTERVAL '7 days', if_not_exists => TRUE)`)
+
+	// Trigram index so event search hits the message column via an index instead of a full
+	// scan + JSONB cast (pg_trgm; best-effort — degrades to a seq scan if unavailable).
+	_, _ = s.db.Exec(`CREATE EXTENSION IF NOT EXISTS pg_trgm`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_msg_trgm ON events USING gin (message gin_trgm_ops)`)
+
+	// Hourly continuous aggregate: dashboard overview (timeline, per-category, 24h counts)
+	// reads pre-materialized rollups instead of scanning 24h of raw events on every poll. With
+	// real-time aggregation the current partial hour is still included. Best-effort: on plain
+	// Postgres these no-op and the code falls back to raw-table queries (s.caggs stays false).
+	_, _ = s.db.Exec(`CREATE MATERIALIZED VIEW IF NOT EXISTS events_hourly
+		WITH (timescaledb.continuous) AS
+		SELECT time_bucket('1 hour', ts) AS bucket, category, count(*) AS n
+		FROM events GROUP BY bucket, category WITH NO DATA`)
+	// start_offset covers the dashboard's 24h window (+margin) so the whole timeline is
+	// materialized; refreshes are incremental, so only changed regions are recomputed.
+	_, _ = s.db.Exec(`SELECT add_continuous_aggregate_policy('events_hourly',
+		start_offset => INTERVAL '2 days', end_offset => INTERVAL '1 hour',
+		schedule_interval => INTERVAL '30 minutes', if_not_exists => TRUE)`)
+	_ = s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name='events_hourly')`).Scan(&s.caggs)
 	return nil
 }
 
@@ -195,8 +216,11 @@ func (s *pgStore) QueryEvents(f EventFilter) ([]model.Event, error) {
 		add(`"user"`, f.User)
 	}
 	if f.Search != "" {
+		// Search real, indexable columns (message has a trigram GIN index) instead of casting
+		// the whole JSONB doc to text per row — the latter is unindexable and scans everything.
 		i++
-		where = append(where, "(message ILIKE $"+itoa(i)+" OR doc::text ILIKE $"+itoa(i)+")")
+		p := "$" + itoa(i)
+		where = append(where, `(message ILIKE `+p+` OR "user" ILIKE `+p+` OR hostname ILIKE `+p+` OR action ILIKE `+p+`)`)
 		args = append(args, "%"+f.Search+"%")
 	}
 	if f.Since != nil {
@@ -343,30 +367,41 @@ func (s *pgStore) ListResponses(limit int) ([]model.ResponseAction, error) {
 
 func (s *pgStore) Counts() (map[string]int, error) {
 	out := map[string]int{}
-	scalar := func(key, q string, args ...any) error {
-		var n int
-		if err := s.db.QueryRow(q, args...).Scan(&n); err != nil {
-			return err
-		}
-		out[key] = n
-		return nil
+	// Agents: all three counts in one round-trip via FILTER (was 3 queries).
+	var aTotal, aOnline, aIso int
+	if err := s.db.QueryRow(`SELECT count(*),
+		count(*) FILTER (WHERE status='online'),
+		count(*) FILTER (WHERE status='isolated') FROM agents`).Scan(&aTotal, &aOnline, &aIso); err != nil {
+		return nil, err
 	}
-	day := "NOW() - INTERVAL '24 hours'"
-	specs := []struct{ k, q string }{
-		{"agents_total", `SELECT COUNT(*) FROM agents`},
-		{"agents_online", `SELECT COUNT(*) FROM agents WHERE status='online'`},
-		{"agents_isolated", `SELECT COUNT(*) FROM agents WHERE status='isolated'`},
-		{"events_24h", `SELECT COUNT(*) FROM events WHERE ts>=` + day},
-		{"detections_open", `SELECT COUNT(*) FROM detections WHERE status='open'`},
-		{"detections_critical", `SELECT COUNT(*) FROM detections WHERE severity='critical' AND status='open'`},
-		{"dlp_24h", `SELECT COUNT(*) FROM events WHERE category='dlp' AND ts>=` + day},
-		{"responses_total", `SELECT COUNT(*) FROM responses`},
+	out["agents_total"], out["agents_online"], out["agents_isolated"] = aTotal, aOnline, aIso
+
+	// Detections: both counts in one round-trip (was 2 queries).
+	var dOpen, dCrit int
+	if err := s.db.QueryRow(`SELECT count(*) FILTER (WHERE status='open'),
+		count(*) FILTER (WHERE severity='critical' AND status='open') FROM detections`).Scan(&dOpen, &dCrit); err != nil {
+		return nil, err
 	}
-	for _, sp := range specs {
-		if err := scalar(sp.k, sp.q); err != nil {
-			return nil, err
-		}
+	out["detections_open"], out["detections_critical"] = dOpen, dCrit
+
+	var rTotal int
+	if err := s.db.QueryRow(`SELECT count(*) FROM responses`).Scan(&rTotal); err != nil {
+		return nil, err
 	}
+	out["responses_total"] = rTotal
+
+	// Events 24h + DLP 24h in one round-trip. From the hourly continuous aggregate when present
+	// (cheap pre-materialized rollup) instead of scanning 24h of raw events on every poll.
+	var ev24, dlp24 int
+	q := `SELECT count(*), count(*) FILTER (WHERE category='dlp') FROM events WHERE ts >= NOW() - INTERVAL '24 hours'`
+	if s.caggs {
+		q = `SELECT COALESCE(sum(n),0)::bigint, COALESCE(sum(n) FILTER (WHERE category='dlp'),0)::bigint
+			FROM events_hourly WHERE bucket >= NOW() - INTERVAL '24 hours'`
+	}
+	if err := s.db.QueryRow(q).Scan(&ev24, &dlp24); err != nil {
+		return nil, err
+	}
+	out["events_24h"], out["dlp_24h"] = ev24, dlp24
 	return out, nil
 }
 
@@ -375,6 +410,9 @@ func (s *pgStore) SeverityBreakdown() (map[string]int, error) {
 }
 
 func (s *pgStore) EventsPerCategory() (map[string]int, error) {
+	if s.caggs {
+		return s.groupCount(`SELECT category, sum(n)::bigint FROM events_hourly WHERE bucket>=NOW() - INTERVAL '24 hours' GROUP BY category`)
+	}
 	return s.groupCount(`SELECT category, COUNT(*) FROM events WHERE ts>=NOW() - INTERVAL '24 hours' GROUP BY category`)
 }
 
@@ -397,8 +435,13 @@ func (s *pgStore) groupCount(q string, args ...any) (map[string]int, error) {
 }
 
 func (s *pgStore) EventTimeline() ([]map[string]any, error) {
-	rows, err := s.db.Query(`SELECT to_char(date_trunc('hour', ts) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, COUNT(*)
-		FROM events WHERE ts>=NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1`)
+	q := `SELECT to_char(date_trunc('hour', ts) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, COUNT(*)
+		FROM events WHERE ts>=NOW() - INTERVAL '24 hours' GROUP BY 1 ORDER BY 1`
+	if s.caggs {
+		q = `SELECT to_char(bucket AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:00:00"Z"') AS hour, sum(n)::bigint
+			FROM events_hourly WHERE bucket>=NOW() - INTERVAL '24 hours' GROUP BY bucket ORDER BY bucket`
+	}
+	rows, err := s.db.Query(q)
 	if err != nil {
 		return nil, err
 	}

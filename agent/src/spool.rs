@@ -67,24 +67,33 @@ impl Spool {
         Ok(())
     }
 
-    /// Return the oldest spooled batch (path + decrypted events), if any.
+    /// Return the oldest *usable* spooled batch (path + decrypted events), if any.
+    ///
+    /// Unrecoverable files (truncated, undecryptable after a key rotation/tamper, or
+    /// undecodable) are quarantined (deleted) and skipped — never returned and never left at
+    /// the head of the queue. This is critical: a single poisoned file must not permanently
+    /// block replay of all newer telemetry on an endpoint. Only a genuine (likely transient)
+    /// IO read error returns Err, so the caller retries later instead of discarding.
     pub fn take_oldest(&self) -> Result<Option<(PathBuf, Vec<Event>)>> {
-        let Some(path) = self.oldest() else {
-            return Ok(None);
-        };
-        let blob = std::fs::read(&path).context("read spool file")?;
-        if blob.len() < 12 {
-            let _ = std::fs::remove_file(&path); // corrupt; discard
-            return Ok(None);
+        loop {
+            let Some(path) = self.oldest() else {
+                return Ok(None);
+            };
+            let blob = std::fs::read(&path).context("read spool file")?;
+            if blob.len() >= 12 {
+                let (nonce_bytes, ct) = blob.split_at(12);
+                if let Some(events) = self
+                    .cipher
+                    .decrypt(Nonce::from_slice(nonce_bytes), ct)
+                    .ok()
+                    .and_then(|pt| serde_json::from_slice::<Vec<Event>>(&pt).ok())
+                {
+                    return Ok(Some((path, events)));
+                }
+            }
+            // Truncated / undecryptable / undecodable → quarantine and try the next file.
+            let _ = std::fs::remove_file(&path);
         }
-        let (nonce_bytes, ct) = blob.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
-        let pt = self
-            .cipher
-            .decrypt(nonce, ct)
-            .map_err(|e| anyhow!("decrypt: {e}"))?;
-        let events: Vec<Event> = serde_json::from_slice(&pt).context("decode spool batch")?;
-        Ok(Some((path, events)))
     }
 
     /// Remove a successfully-replayed batch.
@@ -206,13 +215,32 @@ mod tests {
     }
 
     #[test]
-    fn wrong_key_fails_to_decrypt() {
+    fn wrong_key_quarantines_not_returns() {
         let dir = tmpdir("key");
         let s1 = Spool::open(dir.clone(), &random_key_hex()).unwrap();
         s1.store(&vec![Event::new("process", "exec", "info").msg("secret")]).unwrap();
-        // A spool opened with a different key must NOT silently return data.
+        // Opened with a different key (e.g. state-file lost / key rotated): the undecryptable
+        // file must NOT be returned, must NOT error forever — it is quarantined and drained.
         let s2 = Spool::open(dir.clone(), &random_key_hex()).unwrap();
-        assert!(s2.take_oldest().is_err());
+        assert!(s2.take_oldest().unwrap().is_none());
+        assert_eq!(s2.count(), 0, "undecryptable file should be quarantined");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn poison_file_does_not_block_newer_batches() {
+        let dir = tmpdir("poison");
+        let s = Spool::open(dir.clone(), &random_key_hex()).unwrap();
+        // a valid batch (gets a current-time-ordered name)
+        s.store(&vec![Event::new("process", "exec", "info").msg("good")]).unwrap();
+        // a poison file that sorts FIRST (older timestamp) and is >=12 bytes but undecryptable
+        std::fs::write(dir.join("0000000000000000001-poison.spool"), vec![7u8; 64]).unwrap();
+        // take_oldest must skip the poison (head of FIFO) and still return the good batch
+        let (p, ev) = s.take_oldest().unwrap().expect("good batch");
+        assert_eq!(ev[0].message, "good");
+        s.ack(&p);
+        assert!(s.take_oldest().unwrap().is_none());
+        assert_eq!(s.count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -153,4 +153,32 @@ mod redact_tests {
     fn secrets_keep_partial_hint() {
         assert_eq!(redact("AKIAIOSFODNN7EXAMPLE", false).chars().filter(|&c| c == '*').count(), 16);
     }
+
+    #[test]
+    fn detects_aws_and_private_keys() {
+        let aws = scan("export AWS_KEY=AKIAIOSFODNN7EXAMPLE done");
+        assert!(aws.iter().any(|f| f.classifier == "secret_aws"));
+        let pk = scan("-----BEGIN OPENSSH PRIVATE KEY-----\nabc");
+        assert!(pk.iter().any(|f| f.classifier == "secret_privkey"));
+    }
+
+    #[test]
+    fn luhn_gates_card_matches() {
+        // valid Luhn test PAN → flagged
+        assert!(scan("pay 4111111111111111").iter().any(|f| f.classifier == "pci_card"));
+        // same digits, broken checksum → NOT flagged
+        assert!(!scan("pay 4111111111111112").iter().any(|f| f.classifier == "pci_card"));
+    }
+
+    #[test]
+    fn no_false_positive_on_plain_text() {
+        assert!(scan("the quick brown fox jumps over 12 lazy dogs").is_empty());
+        assert!(scan("").is_empty());
+    }
+
+    #[test]
+    fn luhn_validator_directly() {
+        assert!(luhn_valid("4111111111111111"));
+        assert!(!luhn_valid("1234567890123456"));
+    }
 }

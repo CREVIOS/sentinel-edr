@@ -54,9 +54,11 @@ type Process struct {
 	Name    string `json:"name,omitempty"`
 	Exe     string `json:"exe,omitempty"`
 	Cmdline string `json:"cmdline,omitempty"`
-	UID     int    `json:"uid,omitempty"`
-	User    string `json:"user,omitempty"`
-	Parent  string `json:"parent,omitempty"` // parent process name (lineage)
+	UID       int    `json:"uid,omitempty"`
+	User      string `json:"user,omitempty"`
+	Parent    string `json:"parent,omitempty"`    // immediate parent process name
+	Lineage   string `json:"lineage,omitempty"`   // full ancestry chain (pid1→…→self)
+	Container string `json:"container,omitempty"` // container id+runtime if running in one
 }
 
 // FileInfo describes a filesystem operation.

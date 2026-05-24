@@ -1,6 +1,6 @@
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 
-export interface Process { pid?: number; ppid?: number; name?: string; exe?: string; cmdline?: string; user?: string; parent?: string; }
+export interface Process { pid?: number; ppid?: number; name?: string; exe?: string; cmdline?: string; uid?: number; user?: string; parent?: string; lineage?: string; container?: string; }
 export interface FileInfo { path?: string; op?: string; size?: number; hash?: string; }
 export interface NetInfo { direction?: string; proto?: string; remote?: string; domain?: string; url?: string; category?: string; bytes_out?: number; bytes_in?: number; blocked?: boolean; }
 export interface UsbInfo { action?: string; vendor?: string; product?: string; serial?: string; mount?: string; size_gb?: number; }

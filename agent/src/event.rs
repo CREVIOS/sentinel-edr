@@ -23,6 +23,10 @@ pub struct Process {
     pub user: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub parent: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub lineage: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub container: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

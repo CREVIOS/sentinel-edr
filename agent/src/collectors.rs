@@ -123,6 +123,23 @@ impl ProcessCollector {
                 .and_then(|u| self.users.get_user_by_id(u))
                 .map(|u| u.name().to_string())
                 .unwrap_or_default();
+            // Full ancestry chain (pid1→…→self), not just the immediate parent.
+            let mut chain = vec![name.clone()];
+            let mut cur = proc_.parent();
+            let mut depth = 0;
+            while let Some(pp) = cur {
+                if depth > 16 {
+                    break;
+                }
+                if let Some(pn) = names.get(&pp) {
+                    chain.push(pn.clone());
+                }
+                cur = self.sys.process(pp).and_then(|p| p.parent());
+                depth += 1;
+            }
+            chain.reverse();
+            let lineage = chain.join("→");
+            let container = container_of(pidu);
             let sev = if is_suspicious(&name, &cmdline) {
                 "medium"
             } else {
@@ -140,6 +157,8 @@ impl ProcessCollector {
                 uid,
                 user,
                 parent,
+                lineage,
+                container,
             });
             out.push(ev);
         }
@@ -157,6 +176,73 @@ fn is_suspicious(name: &str, cmd: &str) -> bool {
         || cmd.contains("/dev/tcp")
         || cmd.contains("| bash")
         || cmd.contains("curl ")
+}
+
+/// Container context for a pid from its cgroup membership ("" if not containerized).
+fn container_of(pid: u32) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        return std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            .map(|t| parse_container_from_cgroup(&t))
+            .unwrap_or_default();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        String::new()
+    }
+}
+
+/// Derive "runtime:shortid" from a /proc/<pid>/cgroup body. Recognizes docker, containerd/CRI,
+/// podman and generic kubepods paths. Returns "" when the task isn't in a container.
+fn parse_container_from_cgroup(text: &str) -> String {
+    for line in text.lines() {
+        let path = line.rsplit(':').next().unwrap_or(line);
+        let id = match longest_hex_run(path) {
+            Some(id) => id,
+            None => continue,
+        };
+        let runtime = if path.contains("docker") {
+            "docker"
+        } else if path.contains("crio") {
+            "crio"
+        } else if path.contains("containerd") || path.contains("cri-containerd") {
+            "containerd"
+        } else if path.contains("libpod") || path.contains("podman") {
+            "podman"
+        } else if path.contains("kubepods") {
+            "k8s"
+        } else {
+            "container"
+        };
+        return format!("{}:{}", runtime, &id[..id.len().min(12)]);
+    }
+    String::new()
+}
+
+/// Longest contiguous hex run >= 32 chars (a container id; avoids matching dictionary words).
+fn longest_hex_run(s: &str) -> Option<String> {
+    let mut longest = String::new();
+    let mut run = String::new();
+    for c in s.chars() {
+        if c.is_ascii_hexdigit() {
+            run.push(c);
+        } else {
+            if run.len() > longest.len() {
+                longest = std::mem::take(&mut run);
+            } else {
+                run.clear();
+            }
+        }
+    }
+    if run.len() > longest.len() {
+        longest = run;
+    }
+    if longest.len() >= 32 {
+        Some(longest)
+    } else {
+        None
+    }
 }
 
 // ---------------- login ----------------
@@ -513,6 +599,61 @@ fn removable_mounts() -> Vec<Mount> {
     }
     #[allow(unreachable_code)]
     Vec::new()
+}
+
+// ---------------- kernel modules ----------------
+
+/// Watches for newly loaded kernel modules — a core rootkit / unexpected-driver signal. Reads
+/// /proc/modules and diffs; the initial snapshot is suppressed so only post-start loads fire.
+pub struct ModuleCollector {
+    seen: HashSet<String>,
+    first: bool,
+}
+
+impl ModuleCollector {
+    pub fn new() -> Self {
+        ModuleCollector {
+            seen: HashSet::new(),
+            first: true,
+        }
+    }
+
+    pub fn poll(&mut self) -> Vec<Event> {
+        let current: HashSet<String> = loaded_modules().into_iter().collect();
+        let mut out = Vec::new();
+        if !self.first {
+            for m in current.difference(&self.seen) {
+                let mut ev = Event::new("system", "kmod_load", "medium")
+                    .msg(format!("kernel module loaded: {m}"));
+                ev.extra
+                    .insert("module".into(), serde_json::Value::String(m.clone()));
+                out.push(ev);
+            }
+        }
+        self.seen = current;
+        self.first = false;
+        out
+    }
+}
+
+/// First token of each /proc/modules line = the module name. Pure (testable).
+fn parse_proc_modules(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| l.split_whitespace().next().map(|s| s.to_string()))
+        .collect()
+}
+
+fn loaded_modules() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        return std::fs::read_to_string("/proc/modules")
+            .map(|t| parse_proc_modules(&t))
+            .unwrap_or_default();
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
 }
 
 // ---------------- file integrity monitoring ----------------
@@ -1097,6 +1238,29 @@ mod p0_tests {
         assert!(is_removable_mount("/mnt"));
         assert!(!is_removable_mount("/"));
         assert!(!is_removable_mount("/home/alice"));
+    }
+
+    #[test]
+    fn cgroup_detects_docker_container() {
+        let id = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f60011";
+        let text = format!("0::/system.slice/docker-{id}.scope");
+        let got = parse_container_from_cgroup(&text);
+        assert_eq!(got, format!("docker:{}", &id[..12]));
+    }
+
+    #[test]
+    fn cgroup_kubepods_and_bare() {
+        let id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let kube = format!("0::/kubepods.slice/kubepods-burstable-pod.../cri-containerd-{id}.scope");
+        assert!(parse_container_from_cgroup(&kube).ends_with(&id[..12]));
+        // host process (no container id) → empty
+        assert_eq!(parse_container_from_cgroup("0::/init.scope"), "");
+    }
+
+    #[test]
+    fn proc_modules_first_token() {
+        let text = "nf_tables 245760 1 - Live 0x0\nevil_rk 16384 0 - Live 0x0\n";
+        assert_eq!(parse_proc_modules(text), vec!["nf_tables", "evil_rk"]);
     }
 
     #[test]

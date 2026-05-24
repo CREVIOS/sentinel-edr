@@ -1,11 +1,13 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type ColumnDef } from "@tanstack/react-table";
 import { Chip } from "@/components/severity";
+import { Metric } from "@/components/metric";
+import { DataTable, SortHeader } from "@/components/data-table";
 import { useData } from "@/lib/use-data";
 import { ago } from "@/lib/format";
 import type { ResponseAction } from "@/lib/types";
+import { Crosshair, Bot, CheckCircle2, XCircle } from "lucide-react";
 
 const LABEL: Record<string, string> = {
   kill_process: "Kill Process", isolate: "Isolate Endpoint", unisolate: "Lift Isolation",
@@ -13,19 +15,19 @@ const LABEL: Record<string, string> = {
 };
 
 function statusColor(s: string) {
-  return s === "completed" ? "var(--chart-2)" : s === "failed" ? "var(--sev-critical)" : s === "pending" ? "var(--sev-medium)" : "var(--muted-foreground)";
+  return s === "completed" ? "var(--signal)" : s === "failed" ? "var(--sev-critical)" : s === "pending" ? "var(--sev-medium)" : "var(--muted-foreground)";
 }
 
-function StatMini({ label, value, accent }: { label: string; value: React.ReactNode; accent?: string }) {
-  return (
-    <Card className="transition-colors hover:border-foreground/15">
-      <CardContent className="p-5">
-        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
-        <div className="mt-3 font-mono text-[2rem] font-semibold leading-none tabular-nums">{value}</div>
-      </CardContent>
-    </Card>
-  );
-}
+const columns: ColumnDef<ResponseAction>[] = [
+  { accessorKey: "ts", header: ({ column }) => <SortHeader column={column} title="Time" />, cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{ago(row.original.ts)}</span> },
+  { accessorKey: "type", header: ({ column }) => <SortHeader column={column} title="Action" />, cell: ({ row }) => <span className="font-mono">{LABEL[row.original.type] || row.original.type}</span> },
+  { id: "target", header: "Target", cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{Object.entries(row.original.target || {}).map(([k, v]) => `${k}=${v}`).join(" ") || "—"}</span> },
+  { accessorKey: "hostname", header: ({ column }) => <SortHeader column={column} title="Host" /> },
+  { id: "source", header: "Source", cell: ({ row }) => row.original.automated ? <Chip color="var(--signal)">auto</Chip> : <Chip>manual</Chip> },
+  { accessorKey: "issued_by", header: "By", cell: ({ row }) => <span className="text-muted-foreground">{row.original.issued_by}</span> },
+  { accessorKey: "status", header: ({ column }) => <SortHeader column={column} title="Status" />, cell: ({ row }) => <Chip color={statusColor(row.original.status)}>{row.original.status}</Chip> },
+  { accessorKey: "result", header: "Result", cell: ({ row }) => <span className="block max-w-[20rem] truncate text-xs text-muted-foreground" title={row.original.result}>{row.original.result}</span> },
+];
 
 export default function ResponsesPage() {
   const { data: responses } = useData<ResponseAction[]>("responses", 3000, "response");
@@ -36,35 +38,21 @@ export default function ResponsesPage() {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatMini label="Total Responses" value={r.length} />
-        <StatMini label="Automated" value={auto} accent="var(--chart-2)" />
-        <StatMini label="Completed" value={done} accent="var(--chart-3)" />
-        <StatMini label="Failed" value={failed} accent="var(--sev-critical)" />
+      <div className="reveal grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Metric label="Total Responses" value={r.length} icon={Crosshair} />
+        <Metric label="Automated" value={auto} icon={Bot} accent="var(--chart-2)" />
+        <Metric label="Completed" value={done} icon={CheckCircle2} accent="var(--signal)" />
+        <Metric label="Failed" value={failed} icon={XCircle} accent="var(--sev-critical)" emphasize={failed > 0} />
       </div>
-      <Card className="panel overflow-hidden">
-        <CardHeader><CardTitle className="font-mono text-sm tracking-wide">RESPONSE ACTIONS · Monitor → Detect → Prevent → Respond</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Action</TableHead><TableHead>Target</TableHead><TableHead>Host</TableHead><TableHead>Source</TableHead><TableHead>By</TableHead><TableHead>Status</TableHead><TableHead>Result</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {r.map((x) => (
-                <TableRow key={x.id}>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{ago(x.ts)}</TableCell>
-                  <TableCell className="font-mono">{LABEL[x.type] || x.type}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{Object.entries(x.target || {}).map(([k, v]) => `${k}=${v}`).join(" ") || "—"}</TableCell>
-                  <TableCell>{x.hostname}</TableCell>
-                  <TableCell>{x.automated ? <Chip color="var(--chart-2)">auto</Chip> : <Chip>manual</Chip>}</TableCell>
-                  <TableCell className="text-muted-foreground">{x.issued_by}</TableCell>
-                  <TableCell><Chip color={statusColor(x.status)}>{x.status}</Chip></TableCell>
-                  <TableCell className="max-w-[20rem] truncate text-xs text-muted-foreground" title={x.result}>{x.result}</TableCell>
-                </TableRow>
-              ))}
-              {r.length === 0 && <TableRow><TableCell colSpan={8} className="py-12 text-center font-mono text-sm text-muted-foreground">no response actions yet</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <DataTable
+        columns={columns}
+        data={r}
+        rowId={(x) => x.id}
+        filterPlaceholder="Filter responses…"
+        pageSize={25}
+        initialSort={[{ id: "ts", desc: true }]}
+        empty="no response actions yet"
+      />
     </div>
   );
 }

@@ -41,7 +41,7 @@ export default function DlpPage() {
         <StatMini label="Policies" value={policies?.length ?? 0} accent="var(--primary)" />
       </div>
 
-      <Card>
+      <Card className="panel overflow-hidden">
         <CardHeader><CardTitle className="font-mono text-sm tracking-wide">DLP INCIDENTS</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -66,7 +66,7 @@ export default function DlpPage() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
+        <Card className="panel overflow-hidden">
           <CardHeader><CardTitle className="font-mono text-sm tracking-wide">CLASSIFIERS</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -77,7 +77,7 @@ export default function DlpPage() {
             </Table>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="panel overflow-hidden">
           <CardHeader><CardTitle className="font-mono text-sm tracking-wide">ENFORCEMENT POLICIES</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>

@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type ColumnDef } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -11,14 +10,19 @@ import {
 import { StatusDot, Chip } from "@/components/severity";
 import { InfoSheet, type Field } from "@/components/info-sheet";
 import { Inspect } from "@/components/inspect";
+import { DataTable, SortHeader } from "@/components/data-table";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useData, post } from "@/lib/use-data";
 import { ago } from "@/lib/format";
 import type { Agent } from "@/lib/types";
 import { MoreHorizontal, ShieldOff, ShieldCheck, Usb, CloudOff } from "lucide-react";
 
+type Pending = { a: Agent; type: string; label: string; destructive?: boolean; desc: string };
+
 export default function EndpointsPage() {
   const { data: agents } = useData<Agent[]>("agents", 5000, "agent");
   const [sel, setSel] = useState<Agent | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
 
   async function act(a: Agent, type: string, label: string) {
     const r = await post("respond", { type, agent_id: a.id, reason: `manual ${type} from console` });
@@ -43,54 +47,49 @@ export default function EndpointsPage() {
     ];
   }
 
+  const columns: ColumnDef<Agent>[] = [
+    { accessorKey: "status", header: ({ column }) => <SortHeader column={column} title="Status" />, cell: ({ row }) => <StatusDot status={row.original.status} /> },
+    { accessorKey: "hostname", header: ({ column }) => <SortHeader column={column} title="Hostname" />, cell: ({ row }) => <span className="font-mono">{row.original.hostname}</span> },
+    { id: "os", header: "OS / Kernel", cell: ({ row }) => <span className="text-muted-foreground">{row.original.os} <span className="opacity-60">{row.original.kernel}</span></span> },
+    { accessorKey: "ip", header: "IP", cell: ({ row }) => <span className="font-mono">{row.original.ip || "—"}</span> },
+    { accessorKey: "mac", header: "MAC", cell: ({ row }) => <span className="font-mono text-muted-foreground">{row.original.mac || "—"}</span> },
+    { accessorKey: "arch", header: "Arch", cell: ({ row }) => <Chip>{row.original.arch || "—"}</Chip> },
+    { accessorKey: "event_count", header: ({ column }) => <SortHeader column={column} title="Events" />, cell: ({ row }) => <span className="font-mono tabular-nums">{row.original.event_count?.toLocaleString?.() ?? row.original.event_count}</span> },
+    { accessorKey: "last_seen", header: ({ column }) => <SortHeader column={column} title="Last Seen" />, cell: ({ row }) => <span className="text-muted-foreground">{ago(row.original.last_seen)}</span> },
+    {
+      id: "actions", enableHiding: false,
+      cell: ({ row }) => {
+        const a = row.original;
+        return (
+          <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+            <Inspect onClick={() => setSel(a)} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8"><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {a.status !== "isolated"
+                  ? <DropdownMenuItem variant="destructive" onClick={() => setPending({ a, type: "isolate", label: "Isolate", destructive: true, desc: `Cut all network traffic from ${a.hostname} except the management server. Active sessions and tooling on the host will lose connectivity until isolation is lifted.` })}><ShieldOff className="size-4" /> Isolate endpoint</DropdownMenuItem>
+                  : <DropdownMenuItem onClick={() => setPending({ a, type: "unisolate", label: "Lift isolation", desc: `Restore normal network connectivity for ${a.hostname}.` })}><ShieldCheck className="size-4" /> Lift isolation</DropdownMenuItem>}
+                <DropdownMenuItem onClick={() => setPending({ a, type: "block_usb", label: "Block USB", desc: `Block USB mass-storage on ${a.hostname}. New removable media will be rejected.` })}><Usb className="size-4" /> Block USB</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPending({ a, type: "block_upload", label: "Block uploads", desc: `Drop new outbound upload channels (web/ftp/nfs) on ${a.hostname}.` })}><CloudOff className="size-4" /> Block uploads</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
-    <>
-      <Card className="panel overflow-hidden">
-        <CardHeader><CardTitle className="font-mono text-xs tracking-[0.16em] text-muted-foreground">ENDPOINT FLEET · {agents?.length ?? 0} enrolled</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Status</TableHead><TableHead>Hostname</TableHead><TableHead>OS / Kernel</TableHead>
-                <TableHead>IP</TableHead><TableHead>MAC</TableHead><TableHead>Arch</TableHead>
-                <TableHead className="text-right">Events</TableHead><TableHead>Last Seen</TableHead><TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(agents || []).map((a) => (
-                <TableRow key={a.id} onClick={() => setSel(a)} className="cursor-pointer">
-                  <TableCell><StatusDot status={a.status} /></TableCell>
-                  <TableCell className="font-mono">{a.hostname}</TableCell>
-                  <TableCell className="text-muted-foreground">{a.os} <span className="opacity-60">{a.kernel}</span></TableCell>
-                  <TableCell className="font-mono">{a.ip || "—"}</TableCell>
-                  <TableCell className="font-mono text-muted-foreground">{a.mac || "—"}</TableCell>
-                  <TableCell><Chip>{a.arch || "—"}</Chip></TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">{a.event_count?.toLocaleString?.() ?? a.event_count}</TableCell>
-                  <TableCell className="text-muted-foreground">{ago(a.last_seen)}</TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-end gap-0.5">
-                    <Inspect onClick={() => setSel(a)} />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8"><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {a.status !== "isolated"
-                          ? <DropdownMenuItem variant="destructive" onClick={() => act(a, "isolate", "Isolate")}><ShieldOff className="size-4" /> Isolate endpoint</DropdownMenuItem>
-                          : <DropdownMenuItem onClick={() => act(a, "unisolate", "Lift isolation")}><ShieldCheck className="size-4" /> Lift isolation</DropdownMenuItem>}
-                        <DropdownMenuItem onClick={() => act(a, "block_usb", "Block USB")}><Usb className="size-4" /> Block USB</DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => act(a, "block_upload", "Block uploads")}><CloudOff className="size-4" /> Block uploads</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(!agents || agents.length === 0) && (
-                <TableRow><TableCell colSpan={9} className="py-12 text-center font-mono text-sm text-muted-foreground">no endpoints enrolled</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+    <div className="reveal space-y-4">
+      <DataTable
+        columns={columns}
+        data={agents || []}
+        rowId={(a) => a.id}
+        onRowClick={(a) => setSel(a)}
+        filterPlaceholder="Filter endpoints…"
+        initialSort={[{ id: "hostname", desc: false }]}
+        empty="no endpoints enrolled"
+      />
 
       <InfoSheet
         open={!!sel}
@@ -103,13 +102,23 @@ export default function EndpointsPage() {
         {sel && (
           <div className="flex flex-wrap gap-2">
             {sel.status !== "isolated"
-              ? <Button size="sm" variant="destructive" onClick={() => act(sel, "isolate", "Isolate")}><ShieldOff className="size-4" /> Isolate</Button>
-              : <Button size="sm" onClick={() => act(sel, "unisolate", "Lift isolation")}><ShieldCheck className="size-4" /> Lift isolation</Button>}
-            <Button size="sm" variant="outline" onClick={() => act(sel, "block_usb", "Block USB")}><Usb className="size-4" /> Block USB</Button>
-            <Button size="sm" variant="outline" onClick={() => act(sel, "block_upload", "Block uploads")}><CloudOff className="size-4" /> Block uploads</Button>
+              ? <Button size="sm" variant="destructive" onClick={() => setPending({ a: sel, type: "isolate", label: "Isolate", destructive: true, desc: `Cut all network traffic from ${sel.hostname} except the management server.` })}><ShieldOff className="size-4" /> Isolate</Button>
+              : <Button size="sm" onClick={() => setPending({ a: sel, type: "unisolate", label: "Lift isolation", desc: `Restore connectivity for ${sel.hostname}.` })}><ShieldCheck className="size-4" /> Lift isolation</Button>}
+            <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "block_usb", label: "Block USB", desc: `Block USB mass-storage on ${sel.hostname}.` })}><Usb className="size-4" /> Block USB</Button>
+            <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "block_upload", label: "Block uploads", desc: `Block outbound uploads on ${sel.hostname}.` })}><CloudOff className="size-4" /> Block uploads</Button>
           </div>
         )}
       </InfoSheet>
-    </>
+
+      <ConfirmDialog
+        open={!!pending}
+        onOpenChange={(o) => !o && setPending(null)}
+        title={pending ? `${pending.label} — ${pending.a.hostname}?` : ""}
+        description={pending?.desc}
+        confirmLabel={pending?.label}
+        destructive={pending?.destructive}
+        onConfirm={() => { if (pending) act(pending.a, pending.type, pending.label); setPending(null); }}
+      />
+    </div>
   );
 }

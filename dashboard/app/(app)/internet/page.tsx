@@ -45,7 +45,7 @@ export default function InternetPage() {
         <StatMini label="Webmail" value={webmail} accent="var(--chart-3)" />
       </div>
 
-      <Card>
+      <Card className="panel overflow-hidden">
         <CardHeader><CardTitle className="font-mono text-sm tracking-wide">TOP DESTINATIONS · by upload</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -60,7 +60,7 @@ export default function InternetPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="panel overflow-hidden">
         <CardHeader><CardTitle className="font-mono text-sm tracking-wide">WEB ACTIVITY · recent</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>

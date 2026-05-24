@@ -1,4 +1,6 @@
 # Build a static Go binary (pure-Go pgx driver → CGO disabled) and ship on distroless.
+# Use the floating golang:1.25 tag + build with `--pull` so the toolchain (and its stdlib
+# security patches, which govulncheck flags by Go version) is always the latest 1.25.x.
 FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY server/go.mod server/go.sum ./

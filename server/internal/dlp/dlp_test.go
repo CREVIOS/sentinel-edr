@@ -62,6 +62,26 @@ func TestRedaction(t *testing.T) {
 	}
 }
 
+func TestPIIPANFullyMasked(t *testing.T) {
+	e := New()
+	for _, c := range e.Scan("card 4111111111111111 and ssn 123-45-6789") {
+		if c.Classifier == "pci_card" || c.Classifier == "pii_ssn" {
+			for _, r := range c.Sample {
+				if r != '*' {
+					t.Fatalf("%s sample not fully masked: %q", c.Classifier, c.Sample)
+				}
+			}
+		}
+	}
+	// direct: PCI/SSN fully masked, others keep a hint
+	if redact("4111111111111111", "pci_card") != "****************" {
+		t.Fatal("pci_card must be fully masked")
+	}
+	if redact("AKIAIOSFODNN7EXAMPLE", "secret_aws") == "********************" {
+		t.Fatal("non-PII should keep a partial hint, not full mask")
+	}
+}
+
 func hasClassifier(fs []Finding, name string) bool {
 	for _, f := range fs {
 		if f.Classifier == name {

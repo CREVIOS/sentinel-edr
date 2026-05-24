@@ -42,6 +42,14 @@ type user struct {
 	role Role
 }
 
+// dummyHash is a valid bcrypt hash at the real cost, compared against on the unknown-user
+// path so its timing matches a genuine wrong-password compare (anti-enumeration).
+var dummyHash []byte
+
+func init() {
+	dummyHash, _ = bcrypt.GenerateFromPassword([]byte("timing-decoy-not-a-credential"), bcrypt.DefaultCost)
+}
+
 // Manager validates credentials and tokens.
 type Manager struct {
 	secret []byte
@@ -95,8 +103,10 @@ func (m *Manager) Login(username, password string) (string, Role, error) {
 	u, ok := m.users[username]
 	m.mu.RUnlock()
 	if !ok {
-		// constant-time-ish: still run a bcrypt compare against a dummy hash
-		_ = bcrypt.CompareHashAndPassword([]byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv"), []byte(password))
+		// Defeat user enumeration by timing: run a real bcrypt compare against a VALID dummy
+		// hash so the unknown-user path costs the same as a wrong-password path. (A malformed
+		// hash would be rejected instantly, leaking that the user doesn't exist.)
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		return "", "", errors.New("invalid credentials")
 	}
 	if err := bcrypt.CompareHashAndPassword(u.hash, []byte(password)); err != nil {

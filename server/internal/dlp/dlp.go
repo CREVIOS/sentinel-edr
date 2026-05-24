@@ -113,7 +113,7 @@ func (e *Engine) Scan(text string) []Finding {
 			}
 			valid++
 			if sample == "" {
-				sample = redact(cand)
+				sample = redact(cand, c.Name)
 			}
 		}
 		if valid == 0 {
@@ -208,9 +208,13 @@ func shannon(s string) float64 {
 	return h
 }
 
-func redact(s string) string {
-	if len(s) <= 4 {
-		return strings.Repeat("*", len(s))
+// redact masks a sample. PII/PAN classifiers are FULLY masked so no partial SSN/card digit is
+// ever persisted to DB/console/SIEM (mirrors the agent-side policy); others keep a short hint.
+// Operates on runes so multibyte input can't panic on a byte slice.
+func redact(s, classifier string) string {
+	r := []rune(s)
+	if classifier == "pci_card" || classifier == "pii_ssn" || len(r) <= 4 {
+		return strings.Repeat("*", len(r))
 	}
-	return s[:2] + strings.Repeat("*", len(s)-4) + s[len(s)-2:]
+	return string(r[:2]) + strings.Repeat("*", len(r)-4) + string(r[len(r)-2:])
 }

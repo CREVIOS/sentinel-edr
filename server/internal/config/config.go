@@ -31,28 +31,30 @@ type Config struct {
 	Correlate      bool   // worker also runs behavioral correlation
 	AllowOrigins   []string
 	TrustedProxies []string // CIDR/IP list allowed to set X-Forwarded-For
+	MetricsToken   string   // if set, /metrics requires this bearer token
 }
 
 // Load reads configuration from the environment with sensible, secure defaults.
 func Load() *Config {
 	c := &Config{
-		Env:         env("SENTINEL_ENV", "development"),
-		Role:        env("SENTINEL_ROLE", "all"),
-		HTTPAddr:    env("SENTINEL_HTTP_ADDR", ":8080"),
-		DatabaseURL: env("SENTINEL_DATABASE_URL", "postgres://sentinel:sentinel@localhost:5432/sentinel?sslmode=disable"),
-		NatsURL:     env("SENTINEL_NATS_URL", ""),
-		RedisURL:    env("SENTINEL_REDIS_URL", ""),
-		JWTSecret:   env("SENTINEL_JWT_SECRET", ""),
-		EnrollToken: env("SENTINEL_ENROLL_TOKEN", ""),
-		AdminUser:   env("SENTINEL_ADMIN_USER", "admin"),
-		AdminPass:   env("SENTINEL_ADMIN_PASS", ""),
-		TLSCert:     env("SENTINEL_TLS_CERT", ""),
-		TLSKey:      env("SENTINEL_TLS_KEY", ""),
-		TLSClientCA: env("SENTINEL_TLS_CLIENT_CA", ""),
-		RulesDir:    env("SENTINEL_RULES_DIR", "rules"),
-		WebDir:      env("SENTINEL_WEB_DIR", ""),
-		Correlate:   env("SENTINEL_CORRELATE", "true") != "false",
-		BehindProxy: env("SENTINEL_BEHIND_PROXY", "") == "true",
+		Env:          env("SENTINEL_ENV", "development"),
+		Role:         env("SENTINEL_ROLE", "all"),
+		HTTPAddr:     env("SENTINEL_HTTP_ADDR", ":8080"),
+		DatabaseURL:  env("SENTINEL_DATABASE_URL", "postgres://sentinel:sentinel@localhost:5432/sentinel?sslmode=disable"),
+		NatsURL:      env("SENTINEL_NATS_URL", ""),
+		RedisURL:     env("SENTINEL_REDIS_URL", ""),
+		JWTSecret:    env("SENTINEL_JWT_SECRET", ""),
+		EnrollToken:  env("SENTINEL_ENROLL_TOKEN", ""),
+		AdminUser:    env("SENTINEL_ADMIN_USER", "admin"),
+		AdminPass:    env("SENTINEL_ADMIN_PASS", ""),
+		TLSCert:      env("SENTINEL_TLS_CERT", ""),
+		TLSKey:       env("SENTINEL_TLS_KEY", ""),
+		TLSClientCA:  env("SENTINEL_TLS_CLIENT_CA", ""),
+		RulesDir:     env("SENTINEL_RULES_DIR", "rules"),
+		WebDir:       env("SENTINEL_WEB_DIR", ""),
+		Correlate:    env("SENTINEL_CORRELATE", "true") != "false",
+		BehindProxy:  env("SENTINEL_BEHIND_PROXY", "") == "true",
+		MetricsToken: env("SENTINEL_METRICS_TOKEN", ""),
 	}
 	if o := env("SENTINEL_ALLOW_ORIGINS", ""); o != "" {
 		c.AllowOrigins = strings.Split(o, ",")

@@ -118,13 +118,16 @@ func (h *Hub) SendCommand(agentID string, cmd model.Command, timeout time.Durati
 	if !ok {
 		return model.CommandResult{ID: cmd.ID, OK: false, Message: "agent offline"}, false
 	}
+	// Key pending results by (agentID, commandID) so only the agent the command was sent to
+	// can satisfy it — a different agent's websocket cannot spoof the result by ID alone.
+	pkey := agentID + "|" + cmd.ID
 	ch := make(chan model.CommandResult, 1)
 	h.pendingMu.Lock()
-	h.pending[cmd.ID] = ch
+	h.pending[pkey] = ch
 	h.pendingMu.Unlock()
 	defer func() {
 		h.pendingMu.Lock()
-		delete(h.pending, cmd.ID)
+		delete(h.pending, pkey)
 		h.pendingMu.Unlock()
 	}()
 
@@ -160,10 +163,11 @@ func (h *Hub) PingAgent(id string) bool {
 	return err == nil
 }
 
-// DeliverResult routes an agent's command reply back to the waiting caller.
-func (h *Hub) DeliverResult(res model.CommandResult) {
+// DeliverResult routes an agent's command reply back to the waiting caller. agentID is the
+// authenticated sender from the websocket — results are matched only within that agent's scope.
+func (h *Hub) DeliverResult(agentID string, res model.CommandResult) {
 	h.pendingMu.Lock()
-	ch, ok := h.pending[res.ID]
+	ch, ok := h.pending[agentID+"|"+res.ID]
 	h.pendingMu.Unlock()
 	if ok {
 		select {

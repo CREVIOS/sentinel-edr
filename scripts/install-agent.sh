@@ -26,6 +26,15 @@ log() { printf '\033[36m▸\033[0m %s\n' "$*"; }
 need_root
 [ -z "$SERVER" ] && { echo "ERROR: set SENTINEL_SERVER"; exit 1; }
 [ -z "$TOKEN" ]  && { echo "ERROR: set SENTINEL_ENROLL_TOKEN"; exit 1; }
+# Enroll token + agent key travel in headers — refuse cleartext transport in production.
+case "$SERVER" in
+  https://*) ;;
+  *) if [ "${SENTINEL_ALLOW_INSECURE:-0}" = "1" ]; then
+       log "WARNING: SENTINEL_SERVER is not https:// — credentials sent in cleartext (SENTINEL_ALLOW_INSECURE=1)"
+     else
+       echo "ERROR: SENTINEL_SERVER must be https:// (set SENTINEL_ALLOW_INSECURE=1 to override for local testing)"; exit 1
+     fi ;;
+esac
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"; case "$ARCH" in x86_64|amd64) ARCH=x86_64;; aarch64|arm64) ARCH=aarch64;; esac
@@ -43,7 +52,21 @@ if [ -n "${SENTINEL_AGENT_BINARY:-}" ] && [ -x "$SENTINEL_AGENT_BINARY" ]; then
 elif [ -n "${SENTINEL_RELEASE_URL:-}" ]; then
   url="$SENTINEL_RELEASE_URL/sentinel-agent-${OS}-${ARCH}"
   log "downloading $url"
-  tmp="$(mktemp)"; curl -fsSL "$url" -o "$tmp"; install -m 0755 "$tmp" "$BIN"; rm -f "$tmp"
+  tmp="$(mktemp)"; curl -fsSL "$url" -o "$tmp"
+  # Supply-chain integrity: verify the binary against a published SHA-256 before installing.
+  if curl -fsSL "$url.sha256" -o "$tmp.sha" 2>/dev/null; then
+    want="$(awk '{print $1}' "$tmp.sha")"
+    got="$( (sha256sum "$tmp" 2>/dev/null || shasum -a 256 "$tmp") | awk '{print $1}')"
+    if [ -z "$want" ] || [ "$want" != "$got" ]; then
+      rm -f "$tmp" "$tmp.sha"; echo "ERROR: agent checksum mismatch (want=$want got=$got) — aborting"; exit 1
+    fi
+    log "checksum verified ($got)"
+  elif [ "${SENTINEL_REQUIRE_CHECKSUM:-0}" = "1" ]; then
+    rm -f "$tmp"; echo "ERROR: no checksum at $url.sha256 and SENTINEL_REQUIRE_CHECKSUM=1 — aborting"; exit 1
+  else
+    log "WARNING: no checksum published at $url.sha256 — installing UNVERIFIED binary (set SENTINEL_REQUIRE_CHECKSUM=1 to fail closed)"
+  fi
+  install -m 0755 "$tmp" "$BIN"; rm -f "$tmp" "$tmp.sha"
 elif [ -d "agent" ] && command -v cargo >/dev/null 2>&1; then
   log "building from source (cargo, release)…"
   ( cd agent && cargo build --release )

@@ -299,7 +299,7 @@ func (s *Server) agentWS(w http.ResponseWriter, r *http.Request) {
 		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		var res model.CommandResult
 		if json.Unmarshal(data, &res) == nil && res.ID != "" {
-			s.hub.DeliverResult(res)
+			s.hub.DeliverResult(agentID, res) // scoped to this authenticated agent
 		}
 	}
 }
@@ -328,7 +328,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int((12 * time.Hour).Seconds()),
 		HttpOnly: true,
-		Secure:   s.cfg.TLSEnabled(),
+		// Secure when TLS is local OR terminated upstream (behind-proxy prod), so the auth
+		// cookie is never sent in cleartext.
+		Secure:   s.cfg.TLSEnabled() || s.cfg.BehindProxy,
 		SameSite: http.SameSiteStrictMode,
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"token": tok, "role": string(role), "user": req.Username})
@@ -600,8 +602,14 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ready"))
 }
 
-// metrics exposes Prometheus-format gauges scraped from the store.
+// metrics exposes Prometheus-format gauges scraped from the store. When SENTINEL_METRICS_TOKEN
+// is set it requires that bearer token (fleet/security counters shouldn't be world-readable);
+// left open otherwise for standard internal Prometheus scraping.
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.MetricsToken != "" && strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != s.cfg.MetricsToken {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	counts, err := s.store.Counts()
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 	if err != nil {

@@ -124,3 +124,33 @@ fn redact(s: &str, full: bool) -> String {
     let tail: String = chars[n - 2..].iter().collect();
     format!("{}{}{}", head, "*".repeat(n - 4), tail)
 }
+
+#[cfg(test)]
+mod redact_tests {
+    use super::*;
+
+    // N5: PII/PAN samples must be fully masked — no digit of the card/SSN may persist.
+    #[test]
+    fn pii_pan_fully_masked() {
+        let f = scan("payment 4111 1111 1111 1111 ssn 123-45-6789 done");
+        let card = f.iter().find(|x| x.classifier == "pci_card").expect("card");
+        assert!(
+            card.sample.chars().all(|c| c == '*'),
+            "card sample not fully masked: {}",
+            card.sample
+        );
+        let ssn = f.iter().find(|x| x.classifier == "pii_ssn").expect("ssn");
+        assert!(
+            ssn.sample.chars().all(|c| c == '*'),
+            "ssn sample not fully masked: {}",
+            ssn.sample
+        );
+        assert!(!ssn.sample.contains('6'), "ssn digit leaked: {}", ssn.sample);
+    }
+
+    // Non-PII classifiers keep the first-2/last-2 hint.
+    #[test]
+    fn secrets_keep_partial_hint() {
+        assert_eq!(redact("AKIAIOSFODNN7EXAMPLE", false).chars().filter(|&c| c == '*').count(), 16);
+    }
+}

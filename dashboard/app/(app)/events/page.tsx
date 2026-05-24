@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sev, Chip } from "@/components/severity";
 import { InfoSheet, type Field } from "@/components/info-sheet";
+import { Inspect } from "@/components/inspect";
 import { useLiveList, useDebounced } from "@/lib/use-data";
 import { bytes, detail, shortTime } from "@/lib/format";
 import type { Event } from "@/lib/types";
@@ -85,7 +86,7 @@ export default function EventsPage() {
     });
 
   return (
-    <div className="space-y-4">
+    <div className="reveal space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Input placeholder="Search command, path, domain, user…" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
         <Select value={cat} onValueChange={setCat}>
@@ -98,33 +99,36 @@ export default function EventsPage() {
         </Select>
         <button
           onClick={() => setLive((v) => !v)}
-          className="inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-secondary/50"
+          className={`inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors hover:bg-secondary/50 ${live && connected ? "border-[color-mix(in_oklch,var(--signal)_45%,transparent)] text-[var(--signal)]" : "text-muted-foreground"}`}
         >
-          <span className="size-2 rounded-full" style={{ background: live && connected ? "var(--chart-2)" : "var(--muted-foreground)" }} />
+          {live && connected ? <span className="live-dot size-2" /> : <span className="size-2 rounded-full bg-muted-foreground" />}
           {live ? "live" : "paused"}
         </button>
         <Chip>{events.length} loaded</Chip>
       </div>
 
-      <Card>
+      <Card className="panel overflow-hidden">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow><TableHead className="w-20">Time</TableHead><TableHead className="w-24">Sev</TableHead><TableHead className="w-28">Category</TableHead><TableHead>Host</TableHead><TableHead>User</TableHead><TableHead>Detail</TableHead></TableRow>
+              <TableRow><TableHead className="w-20">Time</TableHead><TableHead className="w-24">Sev</TableHead><TableHead className="w-28">Category</TableHead><TableHead>Host</TableHead><TableHead>User</TableHead><TableHead>Detail</TableHead><TableHead className="w-10" /></TableRow>
             </TableHeader>
             <TableBody>
               {events.map((e) => (
-                <TableRow key={e.id} onClick={() => setSel(e)} className="cursor-pointer">
+                <TableRow key={e.id} onClick={() => setSel(e)} className="group cursor-pointer">
                   <TableCell className="font-mono text-xs text-muted-foreground">{shortTime(e.ts)}</TableCell>
                   <TableCell><Sev s={e.severity} /></TableCell>
                   <TableCell className="text-muted-foreground"><span className="font-mono text-xs">{e.category}</span></TableCell>
                   <TableCell className="font-mono">{e.hostname}</TableCell>
                   <TableCell>{e.user || <span className="text-muted-foreground">—</span>}</TableCell>
                   <TableCell><span className="block max-w-[42rem] truncate font-mono text-xs text-chart-2">{detail(e)}</span></TableCell>
+                  <TableCell onClick={(ev) => ev.stopPropagation()} className="text-right">
+                    <span className="opacity-0 transition-opacity group-hover:opacity-100"><Inspect onClick={() => setSel(e)} /></span>
+                  </TableCell>
                 </TableRow>
               ))}
               {!loading && events.length === 0 && (
-                <TableRow><TableCell colSpan={6} className="py-12 text-center font-mono text-sm text-muted-foreground">no events match — telemetry streams here live</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="py-12 text-center font-mono text-sm text-muted-foreground">no events match — telemetry streams here live</TableCell></TableRow>
               )}
             </TableBody>
           </Table>

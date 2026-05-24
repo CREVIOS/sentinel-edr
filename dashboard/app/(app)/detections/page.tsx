@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sev, Chip } from "@/components/severity";
 import { InfoSheet, type Field } from "@/components/info-sheet";
+import { Inspect } from "@/components/inspect";
 import { useData, post } from "@/lib/use-data";
 import { ago } from "@/lib/format";
 import type { Detection } from "@/lib/types";
@@ -50,7 +51,7 @@ export default function DetectionsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="reveal space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
@@ -63,7 +64,7 @@ export default function DetectionsPage() {
         <Chip>{dets.length} detections</Chip>
       </div>
 
-      <Card>
+      <Card className="panel overflow-hidden">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -81,6 +82,8 @@ export default function DetectionsPage() {
                   <TableCell><StatusBadge s={d.status} /></TableCell>
                   <TableCell className="text-muted-foreground">{ago(d.ts)}</TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-0.5">
+                    <Inspect onClick={() => setSel(d)} />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8"><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -89,6 +92,7 @@ export default function DetectionsPage() {
                         <DropdownMenuItem variant="destructive" onClick={() => respond(d, "isolate")}><ShieldOff className="size-4" /> Isolate host</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

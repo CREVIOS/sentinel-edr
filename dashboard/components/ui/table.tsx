@@ -23,7 +23,7 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b", className)}
+      className={cn("[&_tr]:border-b [&_tr]:border-l-transparent [&_tr]:hover:bg-transparent", className)}
       {...props}
     />
   )
@@ -57,7 +57,8 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b transition-colors hover:bg-muted/50 has-aria-expanded:bg-muted/50 data-[state=selected]:bg-muted",
+        // left accent bar appears on hover/expanded — scannable, command-center feel
+        "border-b transition-colors box-border border-l-2 border-l-transparent hover:border-l-primary hover:bg-primary/[0.04] has-aria-expanded:border-l-primary has-aria-expanded:bg-primary/[0.06] data-[state=selected]:bg-muted",
         className
       )}
       {...props}
@@ -70,7 +71,7 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "h-9 px-3 text-left align-middle whitespace-nowrap font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}

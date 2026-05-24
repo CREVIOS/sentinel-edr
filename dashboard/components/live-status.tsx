@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Eye } from "lucide-react";
 import { useStreamStatus } from "@/lib/use-stream";
 
 export function LiveStatus() {
-  // True push-channel status: green when the SSE relay to the control plane is connected.
+  // True push-channel status: lit when the SSE relay to the control plane is connected.
   const live = useStreamStatus();
   const [now, setNow] = useState("");
   useEffect(() => {
@@ -14,19 +15,23 @@ export function LiveStatus() {
   return (
     <div className="flex items-center gap-3">
       <span
-        className="inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-muted-foreground"
+        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+          live
+            ? "border-[color-mix(in_oklch,var(--signal)_45%,transparent)] text-[var(--signal)]"
+            : "text-muted-foreground"
+        }`}
       >
-        <span
-          className="size-2 rounded-full"
-          style={{
-            background: live ? "var(--chart-2)" : "var(--sev-info)",
-            boxShadow: live ? "0 0 8px var(--chart-2)" : "none",
-            animation: live ? "pulse 1.8s infinite" : "none",
-          }}
-        />
-        {live ? "Live" : "Offline"}
+        {live ? (
+          <span className="live-dot size-2" />
+        ) : (
+          <span className="size-2 rounded-full bg-[var(--sev-info)]" />
+        )}
+        {live ? "Watching" : "Offline"}
       </span>
-      <span className="hidden font-mono text-xs text-muted-foreground sm:inline">{now} UTC</span>
+      <span className="hidden items-center gap-1.5 font-mono text-xs text-muted-foreground sm:inline-flex">
+        <Eye className="size-3.5 opacity-70" />
+        {now} UTC
+      </span>
     </div>
   );
 }

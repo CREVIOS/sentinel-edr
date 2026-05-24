@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusDot, Chip } from "@/components/severity";
 import { InfoSheet, type Field } from "@/components/info-sheet";
+import { Inspect } from "@/components/inspect";
 import { useData, post } from "@/lib/use-data";
 import { ago } from "@/lib/format";
 import type { Agent } from "@/lib/types";
@@ -44,8 +45,8 @@ export default function EndpointsPage() {
 
   return (
     <>
-      <Card>
-        <CardHeader><CardTitle className="font-mono text-sm tracking-wide">ENDPOINT FLEET · {agents?.length ?? 0} enrolled</CardTitle></CardHeader>
+      <Card className="panel overflow-hidden">
+        <CardHeader><CardTitle className="font-mono text-xs tracking-[0.16em] text-muted-foreground">ENDPOINT FLEET · {agents?.length ?? 0} enrolled</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -67,6 +68,8 @@ export default function EndpointsPage() {
                   <TableCell className="text-right font-mono tabular-nums">{a.event_count?.toLocaleString?.() ?? a.event_count}</TableCell>
                   <TableCell className="text-muted-foreground">{ago(a.last_seen)}</TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-0.5">
+                    <Inspect onClick={() => setSel(a)} />
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-8"><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -77,6 +80,7 @@ export default function EndpointsPage() {
                         <DropdownMenuItem onClick={() => act(a, "block_upload", "Block uploads")}><CloudOff className="size-4" /> Block uploads</DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

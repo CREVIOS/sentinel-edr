@@ -42,7 +42,7 @@ export default function ResponsesPage() {
         <StatMini label="Completed" value={done} accent="var(--chart-3)" />
         <StatMini label="Failed" value={failed} accent="var(--sev-critical)" />
       </div>
-      <Card>
+      <Card className="panel overflow-hidden">
         <CardHeader><CardTitle className="font-mono text-sm tracking-wide">RESPONSE ACTIONS · Monitor → Detect → Prevent → Respond</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>

@@ -123,6 +123,13 @@ impl ProcessCollector {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             let name = proc_.name().to_string_lossy().to_string();
+            // Skip daemon worker-fork relabels (postgres/nginx rewrite each forked worker's
+            // argv to a status line like "postgres: <user> <db> <client> idle"). These are
+            // fork()s, not execve()s, and otherwise emit one noisy "exec" per DB connection
+            // whose proctitle looks like — but is not — a network destination.
+            if is_worker_relabel(&name, &cmdline) {
+                continue;
+            }
             // Real acting identity (was hardcoded uid 0 / empty user → killed user-scoped rules).
             let uid_obj = proc_.user_id();
             let uid: i64 = uid_obj
@@ -175,6 +182,19 @@ impl ProcessCollector {
         self.first = false;
         out
     }
+}
+
+/// True when a process's argv is a daemon's worker status-line rather than a real command.
+/// Postgres backends ("postgres: …"), nginx workers ("nginx: worker process"), etc. rewrite
+/// their proctitle on fork; treating those as exec events floods the stream with benign noise.
+fn is_worker_relabel(name: &str, cmdline: &str) -> bool {
+    if cmdline.starts_with("postgres:") {
+        return true; // postgres rewrites argv[0] without a space sometimes
+    }
+    if name.is_empty() {
+        return false;
+    }
+    cmdline.starts_with(&format!("{name}: "))
 }
 
 fn is_suspicious(name: &str, cmd: &str) -> bool {
@@ -1306,7 +1326,10 @@ impl AuthLogCollector {
 // ---------------- network ----------------
 
 pub struct NetworkCollector {
-    seen: HashSet<String>,
+    /// connections already turned into events (5-tuple keys), GC'd when the socket closes.
+    emitted: HashSet<String>,
+    /// global-IP connections deferred one poll so background rDNS can resolve before emit.
+    pending: HashSet<String>,
     first: bool,
     dns: crate::dnscache::DnsCache,
 }
@@ -1314,7 +1337,8 @@ pub struct NetworkCollector {
 impl NetworkCollector {
     pub fn new(dns: crate::dnscache::DnsCache) -> Self {
         NetworkCollector {
-            seen: HashSet::new(),
+            emitted: HashSet::new(),
+            pending: HashSet::new(),
             first: true,
             dns,
         }
@@ -1326,55 +1350,134 @@ impl NetworkCollector {
         let mut out = Vec::new();
         for conn in &conns {
             let key = conn.key();
-            if !self.seen.contains(&key) && !self.first {
-                let who = if conn.process.is_empty() {
-                    String::new()
-                } else {
-                    format!(" by {} (pid {})", conn.process, conn.pid)
-                };
-                // Attribute the remote IP to a domain (eBPF DNS cache → best-effort rDNS).
-                let domain = remote_ip(&conn.remote)
-                    .and_then(|ip| self.dns.lookup(ip))
-                    .unwrap_or_default();
-                let dest = if domain.is_empty() {
-                    conn.remote.clone()
-                } else {
-                    format!("{} [{}]", domain, conn.remote)
-                };
-                let mut ev = Event::new("network", "connect", "info").msg(format!(
-                    "outbound {} connection to {}{}",
-                    conn.proto, dest, who
-                ));
-                let category = if domain.is_empty() {
-                    conn.category()
-                } else {
-                    categorize_domain(&domain).to_string()
-                };
-                ev.network = Some(NetInfo {
-                    direction: "outbound".into(),
-                    proto: conn.proto.clone(),
-                    local_addr: conn.local.clone(),
-                    remote: conn.remote.clone(),
-                    domain,
-                    category,
-                    bytes_out: conn.bytes_out,
-                    bytes_in: conn.bytes_in,
+            if self.emitted.contains(&key) {
+                continue;
+            }
+            if self.first {
+                self.emitted.insert(key); // baseline: don't flood with the existing socket table
+                continue;
+            }
+            let ip = remote_ip(&conn.remote);
+            let global = ip.map(crate::dnscache::is_global).unwrap_or(false);
+            // Attribute the remote IP to a domain (eBPF DNS cache → best-effort rDNS).
+            let domain = ip.and_then(|i| self.dns.lookup(i)).unwrap_or_default();
+            // rDNS resolves on a background thread, so the first lookup of a fresh global IP
+            // misses. Defer the connection one poll (~5s) so the event carries the hostname
+            // instead of a bare IP. Only defer once — if it still hasn't resolved, emit the IP.
+            if domain.is_empty() && global && !self.pending.contains(&key) {
+                self.pending.insert(key);
+                continue;
+            }
+            self.pending.remove(&key);
+            self.emitted.insert(key.clone());
+
+            let direction = classify_direction(&conn.local, &conn.remote);
+            let who = if conn.process.is_empty() {
+                String::new()
+            } else {
+                format!(" by {} (pid {})", conn.process, conn.pid)
+            };
+            let peer = if domain.is_empty() {
+                conn.remote.clone()
+            } else {
+                format!("{} [{}]", domain, conn.remote)
+            };
+            let msg = if direction == "inbound" {
+                format!("inbound {} connection from {}{}", conn.proto, peer, who)
+            } else {
+                format!("outbound {} connection to {}{}", conn.proto, peer, who)
+            };
+            // Private/link-local peers are intra-host/LAN, not "internet" — label them so the
+            // console can separate internal traffic from real external destinations.
+            let category = if !global {
+                "internal".to_string()
+            } else if !domain.is_empty() {
+                categorize_domain(&domain).to_string()
+            } else {
+                conn.category()
+            };
+            let mut ev = Event::new("network", "connect", "info").msg(msg);
+            ev.network = Some(NetInfo {
+                direction: direction.into(),
+                proto: conn.proto.clone(),
+                local_addr: conn.local.clone(),
+                remote: conn.remote.clone(),
+                domain,
+                category,
+                bytes_out: conn.bytes_out,
+                bytes_in: conn.bytes_in,
+                ..Default::default()
+            });
+            if conn.pid > 0 {
+                ev.process = Some(Process {
+                    pid: conn.pid,
+                    name: conn.process.clone(),
                     ..Default::default()
                 });
-                if conn.pid > 0 {
-                    ev.process = Some(Process {
-                        pid: conn.pid,
-                        name: conn.process.clone(),
-                        ..Default::default()
-                    });
-                }
-                out.push(ev);
             }
+            out.push(ev);
         }
-        self.seen = current;
+        // GC sockets that have closed so a later reconnect re-emits (and re-resolves).
+        self.emitted.retain(|k| current.contains(k));
+        self.pending.retain(|k| current.contains(k));
         self.first = false;
         out
     }
+}
+
+/// Decide outbound (we initiated; remote is the server) vs inbound (remote is a client of our
+/// listening port) from the two port numbers. A well-known service port on one side marks the
+/// server; otherwise the numerically-lower port is the server side.
+fn classify_direction(local: &str, remote: &str) -> &'static str {
+    let port = |a: &str| remote_port(a).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    let (lp, rp) = (port(local), port(remote));
+    let (lsvc, rsvc) = (is_service_port(lp), is_service_port(rp));
+    if rsvc && !lsvc {
+        return "outbound";
+    }
+    if lsvc && !rsvc {
+        return "inbound";
+    }
+    if lp != 0 && rp != 0 && lp < rp {
+        "inbound"
+    } else {
+        "outbound"
+    }
+}
+
+/// Common server/listening ports — used to infer connection direction.
+fn is_service_port(p: u32) -> bool {
+    matches!(
+        p,
+        20 | 21
+            | 22
+            | 25
+            | 53
+            | 80
+            | 110
+            | 123
+            | 143
+            | 389
+            | 443
+            | 465
+            | 587
+            | 636
+            | 853
+            | 993
+            | 995
+            | 1433
+            | 3306
+            | 3389
+            | 5432
+            | 5672
+            | 6379
+            | 8080
+            | 8443
+            | 9092
+            | 9200
+            | 11211
+            | 27017
+    )
 }
 
 #[derive(Clone, Default)]
@@ -1575,6 +1678,28 @@ mod p0_tests {
         assert_eq!(name, "curl");
         // no process info → zeros
         assert_eq!(parse_ss_process("-"), (0, String::new()));
+    }
+
+    #[test]
+    fn direction_from_ports() {
+        // remote is a well-known service port, local ephemeral → we dialed out
+        assert_eq!(classify_direction("10.0.0.2:51234", "1.1.1.1:443"), "outbound");
+        // local is our listening port, remote ephemeral → someone dialed in
+        assert_eq!(classify_direction("10.0.0.2:443", "203.0.113.9:51234"), "inbound");
+        assert_eq!(classify_direction("10.0.0.2:22", "203.0.113.9:60000"), "inbound");
+        // ipv6 forms
+        assert_eq!(classify_direction("[2001:db8::2]:51000", "[2606:4700::1]:443"), "outbound");
+        // postgres backend: client ephemeral → server 5432 (we are the client side here)
+        assert_eq!(classify_direction("172.23.0.4:44036", "172.23.0.5:5432"), "outbound");
+    }
+
+    #[test]
+    fn worker_relabel_detected() {
+        assert!(is_worker_relabel("postgres", "postgres: postgres comp 172.23.0.5(44122) idle"));
+        assert!(is_worker_relabel("nginx", "nginx: worker process"));
+        // a real command must NOT be filtered
+        assert!(!is_worker_relabel("bash", "bash -c whoami"));
+        assert!(!is_worker_relabel("python3", "python3 -m http.server"));
     }
 
     #[test]

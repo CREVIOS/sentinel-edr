@@ -128,8 +128,8 @@ fn forward_confirmed_rdns(ip: IpAddr) -> Option<String> {
 }
 
 /// Exclude private/link-local/CGNAT — those never have meaningful public PTRs and pointlessly
-/// query the local resolver.
-fn is_global(ip: IpAddr) -> bool {
+/// query the local resolver. Public so the network collector can label internal vs external.
+pub fn is_global(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
             let o = v4.octets();

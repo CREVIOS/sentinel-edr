@@ -16,6 +16,15 @@ import { Globe, UploadCloud, Cloud, Mail } from "lucide-react";
 
 type Dest = { domain: string; hits: number; out: number; in: number; cat: string };
 
+// Strip the port from an "ip:port" / "[v6]:port" peer so connections to the same host collapse
+// into one destination row (instead of one row per ephemeral source port).
+function hostOf(remote?: string): string {
+  if (!remote) return "";
+  if (remote.startsWith("[")) return remote.slice(0, remote.indexOf("]") + 1); // [v6]
+  const i = remote.lastIndexOf(":");
+  return i > 0 ? remote.slice(0, i) : remote;
+}
+
 export default function InternetPage() {
   const { data: events } = useData<Event[]>("events?category=network&limit=500", 5000, "event");
   const [sel, setSel] = useState<Event | null>(null);
@@ -37,13 +46,18 @@ export default function InternetPage() {
     return out.length > 1 ? out : [0, 0];
   }, [net]);
 
+  // Top destinations = real outbound, external targets only (drop inbound clients and
+  // intra-host/LAN traffic), keyed by host so all connections to a server group together.
   const dests = useMemo<Dest[]>(() => {
     const m: Record<string, Dest> = {};
-    net.forEach((e) => {
-      const d = e.network!.domain || e.network!.remote || "unknown";
-      if (!m[d]) m[d] = { domain: d, hits: 0, out: 0, in: 0, cat: e.network!.category || "web" };
-      m[d].hits++; m[d].out += e.network!.bytes_out || 0; m[d].in += e.network!.bytes_in || 0;
-    });
+    net
+      .filter((e) => e.network!.direction !== "inbound" && e.network!.category !== "internal")
+      .forEach((e) => {
+        const n = e.network!;
+        const d = n.domain || hostOf(n.remote) || "unknown";
+        if (!m[d]) m[d] = { domain: d, hits: 0, out: 0, in: 0, cat: n.category || "web" };
+        m[d].hits++; m[d].out += n.bytes_out || 0; m[d].in += n.bytes_in || 0;
+      });
     return Object.values(m).sort((a, b) => b.out - a.out);
   }, [net]);
 
@@ -59,7 +73,8 @@ export default function InternetPage() {
     { accessorKey: "ts", header: ({ column }) => <SortHeader column={column} title="Time" />, cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{ago(row.original.ts)}</span> },
     { accessorKey: "hostname", header: ({ column }) => <SortHeader column={column} title="Host" />, cell: ({ row }) => <span className="font-mono">{row.original.hostname}</span> },
     { accessorKey: "user", header: "User", cell: ({ row }) => row.original.user || <span className="text-muted-foreground">—</span> },
-    { id: "domain", header: "Domain / Remote", cell: ({ row }) => <span className="font-mono">{row.original.network!.domain || row.original.network!.remote}</span> },
+    { id: "domain", header: "Destination", cell: ({ row }) => { const n = row.original.network!; return <span className="font-mono">{n.domain || hostOf(n.remote) || "—"}</span>; } },
+    { id: "direction", header: "Dir", cell: ({ row }) => { const d = row.original.network!.direction; return <Chip color={d === "inbound" ? "var(--chart-3)" : "var(--chart-2)"}>{d || "—"}</Chip>; } },
     { id: "category", header: "Category", cell: ({ row }) => <Chip>{row.original.network!.category || "web"}</Chip> },
     { id: "out", header: ({ column }) => <SortHeader column={column} title="↑ Out" />, accessorFn: (e) => e.network?.bytes_out || 0, cell: ({ row }) => <span className="font-mono tabular-nums">{bytes(row.original.network!.bytes_out)}</span> },
     { id: "in", header: "↓ In", cell: ({ row }) => <span className="font-mono tabular-nums text-muted-foreground">{bytes(row.original.network!.bytes_in)}</span> },

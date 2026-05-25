@@ -20,6 +20,7 @@ import (
 	"github.com/sentinel/server/internal/auth"
 	"github.com/sentinel/server/internal/behavior"
 	"github.com/sentinel/server/internal/bus"
+	"github.com/sentinel/server/internal/cases"
 	"github.com/sentinel/server/internal/config"
 	"github.com/sentinel/server/internal/detect"
 	"github.com/sentinel/server/internal/dlp"
@@ -31,6 +32,7 @@ import (
 	"github.com/sentinel/server/internal/respond"
 	"github.com/sentinel/server/internal/store"
 	"github.com/sentinel/server/internal/transport"
+	"github.com/sentinel/server/internal/tune"
 )
 
 func main() {
@@ -117,7 +119,22 @@ func main() {
 	if notifier != nil {
 		log.Info("alerting enabled", "sinks", notifier.Sinks(), "min_severity", cfg.AlertMinSev)
 	}
-	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).WithIntel(intelEng).WithNotify(notifier)
+	// Detection tuning (per-rule disable + suppressions) + incident correlation. State is
+	// loaded from the store at boot; in single-node ("all") the same instances are shared by
+	// the worker pipeline and the API so console edits take effect immediately.
+	tuneEng := tune.New()
+	if ov, err := st.ListRuleOverrides(); err != nil {
+		log.Warn("load rule overrides", "err", err)
+	} else {
+		sp, _ := st.ListSuppressions()
+		tuneEng.Load(ov, sp)
+		log.Info("tuning loaded", "disabled_rules", len(tuneEng.DisabledRules()), "suppressions", len(sp))
+	}
+	caseCorr := cases.New(st, log)
+	caseCorr.Seed()
+
+	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).
+		WithIntel(intelEng).WithNotify(notifier).WithTuning(tuneEng).WithCases(caseCorr)
 
 	if cfg.RunsRole("worker") {
 		if err := proc.StartProcessors(busB); err != nil {
@@ -162,7 +179,7 @@ func main() {
 		}
 		apiSrv := api.New(api.Deps{
 			Cfg: cfg, Store: st, Auth: authMgr, Hub: h, Bcast: bcast, Bus: busB,
-			Detect: det, DLP: dlpEng, Respond: resp, Log: log,
+			Detect: det, DLP: dlpEng, Respond: resp, Tune: tuneEng, Log: log,
 		})
 		srv = &http.Server{
 			Addr:              cfg.HTTPAddr,

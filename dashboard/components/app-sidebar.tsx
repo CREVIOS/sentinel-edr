@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, MonitorSmartphone, ListTree, ShieldAlert, FileLock2,
-  Globe, Crosshair, BookLock, Settings2, LogOut, ChevronsUpDown,
+  Globe, Crosshair, BookLock, Settings2, LogOut, ChevronsUpDown, FolderKanban,
 } from "lucide-react";
 import { SentinelMark } from "@/components/logo";
 import { signOut } from "@/lib/auth-client";
@@ -31,6 +31,7 @@ const NAV = [
     label: "Threat",
     items: [
       { href: "/detections", title: "Detections", icon: ShieldAlert },
+      { href: "/cases", title: "Cases", icon: FolderKanban },
       { href: "/dlp", title: "Data Loss (DLP)", icon: FileLock2 },
       { href: "/internet", title: "Internet / Web", icon: Globe },
     ],

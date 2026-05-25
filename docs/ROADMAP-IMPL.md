@@ -66,11 +66,29 @@ kernel-only pieces (eBPF-LSM) are isolated so the rest ships without a kernel te
 - **W4/W7 enforcement — PARTIAL.** cgroup kill_tree + freeze/unfreeze DONE; agent
   self-protection DONE+LIVE (oom_score_adj=-1000 verified). fanotify exec-block +
   eBPF-LSM bprm_check = documented next tier (needs kernel module project).
-- **W5 forensics — PARTIAL.** quarantine_file + live_triage DONE; console incident
-  timeline / process-tree UI + console→agent policy push = TODO (frontend/API).
-- **W6 scale — PARTIAL.** hierarchical events_daily cagg + retention tiers DONE; agent
-  auto-update channel + 700-agent mesh soak = TODO.
+- **W5 forensics — PARTIAL.** quarantine_file + live_triage DONE; **console→agent policy
+  push DONE** (update_policy command: hot-reload watch/DLP/enforce/interval/pause, persisted;
+  POST /api/v1/agents/{id}/policy + PolicyPanel UI). Process-tree timeline UI still TODO.
+- **W6 scale — PARTIAL.** hierarchical events_daily cagg + retention tiers DONE; **agent
+  auto-update DONE** (self_update command: HTTPS+sha256-verified binary swap + systemd
+  restart; POST /api/v1/agents/{id}/upgrade with version no-op). 700-agent mesh soak = TODO.
 - uid/user fix: refresh_processes_specifics with user UpdateKind (was empty).
+
+## STATUS — Fleet-management + SOC tier (added)
+- **CI/CD — DONE.** .github/workflows/ci.yml (go vet/build/test-race/govulncheck · cargo
+  fmt/clippy/test/audit · pnpm build/audit) + release.yml (tag → signed agent binaries +
+  GHCR images). Removes the SSH/rsync deploy pain permanently.
+- **Policy push + auto-update — DONE.** (W5/W6 above) — managed fleet without SSH or kernel.
+- **Incident/case management — DONE.** internal/cases correlator (detections fold into one
+  open case per endpoint within a 30-min window; severity max + MITRE union), cases table +
+  API (list/get/create/update/notes), Cases console page (lifecycle, linked detections,
+  notes). Seeded from open cases at boot (survives restart).
+- **Detection tuning — DONE.** internal/tune (per-rule enable/disable + suppression
+  predicates host|user|agent|summary|rule × equals|contains, expiry, hit counters),
+  consulted in pipeline.emit before persist/alert/auto-respond. API + Rules-page UI
+  (per-rule Switch, suppression manager). Admin-gated at the BFF. Unit-tested (tune+cases).
+- **eBPF telemetry + LSM — NEXT (needs kernel test-bed).** aya scaffold present; tier
+  detection (eBPF→auditd→netlink→polling) wired.
 
 ## Sequence
 W1 (deploy) → W2 (IOC) → W3 (posture/rootkit) → W6 (caggs/retention) → W4 (enforcement) →

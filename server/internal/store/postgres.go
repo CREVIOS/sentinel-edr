@@ -72,6 +72,16 @@ func (s *pgStore) migrate() error {
 			reason TEXT, issued_by TEXT, detection_id TEXT, status TEXT, result TEXT,
 			automated BOOLEAN, doc JSONB)`,
 		`CREATE INDEX IF NOT EXISTS idx_resp_ts ON responses(ts DESC)`,
+		`CREATE TABLE IF NOT EXISTS cases (
+			id TEXT PRIMARY KEY, title TEXT, severity TEXT, status TEXT, assigned_to TEXT,
+			agent_id TEXT, hostname TEXT, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, doc JSONB)`,
+		`CREATE INDEX IF NOT EXISTS idx_cases_status ON cases(status, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_cases_agent ON cases(agent_id, status)`,
+		`CREATE TABLE IF NOT EXISTS suppressions (
+			id TEXT PRIMARY KEY, rule_id TEXT, field TEXT, op TEXT, value TEXT,
+			created_at TIMESTAMPTZ, expires TIMESTAMPTZ, doc JSONB)`,
+		`CREATE TABLE IF NOT EXISTS rule_overrides (
+			rule_id TEXT PRIMARY KEY, enabled BOOLEAN, updated_by TEXT, updated_at TIMESTAMPTZ)`,
 	}
 	for _, q := range stmts {
 		if _, err := s.db.Exec(q); err != nil {
@@ -379,6 +389,123 @@ func (s *pgStore) ListResponses(limit int) ([]model.ResponseAction, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// ---------- cases ----------
+
+func (s *pgStore) InsertCase(c *model.Case) error {
+	doc, _ := json.Marshal(c)
+	_, err := s.db.Exec(`INSERT INTO cases
+		(id,title,severity,status,assigned_to,agent_id,hostname,created_at,updated_at,doc)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, severity=EXCLUDED.severity,
+		status=EXCLUDED.status, assigned_to=EXCLUDED.assigned_to, updated_at=EXCLUDED.updated_at,
+		doc=EXCLUDED.doc`,
+		c.ID, c.Title, c.Severity, c.Status, c.AssignedTo, c.AgentID, c.Hostname,
+		c.CreatedAt, c.UpdatedAt, string(doc))
+	return err
+}
+
+func (s *pgStore) GetCase(id string) (*model.Case, error) {
+	var doc []byte
+	if err := s.db.QueryRow(`SELECT doc FROM cases WHERE id=$1`, id).Scan(&doc); err != nil {
+		return nil, err
+	}
+	var c model.Case
+	if err := json.Unmarshal(doc, &c); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (s *pgStore) ListCases(limit int, status string) ([]model.Case, error) {
+	q := "SELECT doc FROM cases"
+	var args []any
+	if status != "" {
+		q += " WHERE status=$1"
+		args = append(args, status)
+	}
+	q += " ORDER BY updated_at DESC" + limitOffset(limit, 0)
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Case
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		var c model.Case
+		if json.Unmarshal(doc, &c) == nil {
+			out = append(out, c)
+		}
+	}
+	return out, rows.Err()
+}
+
+// ---------- detection tuning ----------
+
+func (s *pgStore) ListSuppressions() ([]model.Suppression, error) {
+	rows, err := s.db.Query(`SELECT doc FROM suppressions ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Suppression
+	for rows.Next() {
+		var doc []byte
+		if err := rows.Scan(&doc); err != nil {
+			return nil, err
+		}
+		var sp model.Suppression
+		if json.Unmarshal(doc, &sp) == nil {
+			out = append(out, sp)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) InsertSuppression(sp *model.Suppression) error {
+	doc, _ := json.Marshal(sp)
+	_, err := s.db.Exec(`INSERT INTO suppressions (id,rule_id,field,op,value,created_at,expires,doc)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT (id) DO UPDATE SET rule_id=EXCLUDED.rule_id, field=EXCLUDED.field,
+		op=EXCLUDED.op, value=EXCLUDED.value, expires=EXCLUDED.expires, doc=EXCLUDED.doc`,
+		sp.ID, sp.RuleID, sp.Field, sp.Op, sp.Value, sp.CreatedAt, sp.Expires, string(doc))
+	return err
+}
+
+func (s *pgStore) DeleteSuppression(id string) error {
+	_, err := s.db.Exec(`DELETE FROM suppressions WHERE id=$1`, id)
+	return err
+}
+
+func (s *pgStore) ListRuleOverrides() ([]model.RuleOverride, error) {
+	rows, err := s.db.Query(`SELECT rule_id,enabled,updated_by,updated_at FROM rule_overrides`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.RuleOverride
+	for rows.Next() {
+		var o model.RuleOverride
+		if err := rows.Scan(&o.RuleID, &o.Enabled, &o.UpdatedBy, &o.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+func (s *pgStore) SetRuleOverride(o *model.RuleOverride) error {
+	_, err := s.db.Exec(`INSERT INTO rule_overrides (rule_id,enabled,updated_by,updated_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (rule_id) DO UPDATE SET enabled=EXCLUDED.enabled,
+		updated_by=EXCLUDED.updated_by, updated_at=EXCLUDED.updated_at`,
+		o.RuleID, o.Enabled, o.UpdatedBy, o.UpdatedAt)
+	return err
 }
 
 func (s *pgStore) Counts() (map[string]int, error) {

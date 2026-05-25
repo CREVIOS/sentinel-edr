@@ -51,6 +51,18 @@ type Store interface {
 	GetResponse(id string) (*model.ResponseAction, error)
 	ListResponses(limit int) ([]model.ResponseAction, error)
 
+	// cases (incident management)
+	InsertCase(c *model.Case) error
+	GetCase(id string) (*model.Case, error)
+	ListCases(limit int, status string) ([]model.Case, error)
+
+	// detection tuning
+	ListSuppressions() ([]model.Suppression, error)
+	InsertSuppression(sp *model.Suppression) error
+	DeleteSuppression(id string) error
+	ListRuleOverrides() ([]model.RuleOverride, error)
+	SetRuleOverride(o *model.RuleOverride) error
+
 	// aggregates for dashboards
 	Counts() (map[string]int, error)
 	SeverityBreakdown() (map[string]int, error)

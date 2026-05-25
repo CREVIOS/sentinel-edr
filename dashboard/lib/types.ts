@@ -26,7 +26,20 @@ export interface ResponseAction {
   id: string; ts: string; type: string; agent_id: string; hostname: string; target: Record<string, unknown>;
   reason: string; issued_by: string; detection_id?: string; status: string; result?: string; automated: boolean;
 }
-export interface Rule { ID: string; Title: string; Severity: string; Category: string; Tactic: string; Description: string; AutoRespond: string; MITRE: string[] | null; }
+export interface Rule { ID: string; Title: string; Severity: string; Category: string; Tactic: string; Description: string; AutoRespond: string; MITRE: string[] | null; Enabled: boolean; }
+
+export type CaseStatus = "open" | "investigating" | "contained" | "closed";
+export interface CaseNote { ts: string; author: string; body: string; }
+export interface Case {
+  id: string; title: string; severity: Severity; status: CaseStatus; assigned_to?: string;
+  agent_id?: string; hostname?: string; detection_ids: string[]; mitre?: string[];
+  notes?: CaseNote[]; created_at: string; updated_at: string; created_by?: string;
+}
+export interface CaseDetail extends Case { detections: Detection[]; }
+export interface Suppression {
+  id: string; rule_id: string; field: string; op: string; value: string;
+  reason?: string; created_by?: string; created_at: string; expires?: string; hits: number;
+}
 export interface Overview {
   counts: Record<string, number>;
   severity: Record<string, number>;

@@ -15,8 +15,21 @@ const GET_MIN_ROLE: { re: RegExp; role: string }[] = [
   { re: /^siem\//, role: "analyst" }, // bulk CEF/ECS export of all events+detections
 ];
 
-// POST/writes always require analyst+ (respond, status changes, exports).
+// POST/writes default to analyst+ (respond, status changes, case work, suppressions).
 const WRITE_MIN_ROLE = "analyst";
+
+// Writes that require admin. The Go layer always sees the BFF's admin token, so these MUST
+// be gated here or any analyst could push agent policy / swap binaries / disable rules.
+const WRITE_ADMIN_ROLE: RegExp[] = [
+  /^agents\/[^/]+\/(policy|upgrade)$/, // fleet policy push + agent self-update
+  /^rules\/[^/]+\/toggle$/, // enable/disable a detection rule
+];
+
+function writeMinRole(path: string[]): string {
+  const p = path.join("/");
+  for (const re of WRITE_ADMIN_ROLE) if (re.test(p)) return "admin";
+  return WRITE_MIN_ROLE;
+}
 
 // Only allow simple path segments — blocks "..", encoded traversal, and any attempt to reach
 // non-/api/v1 Go routes (/metrics, /readyz, /healthz) by path manipulation.
@@ -65,8 +78,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (!validPath(path)) return new Response("bad request", { status: 400 });
   const role = await operatorRole();
   if (!role) return new Response("unauthorized", { status: 401 });
-  if (!allowed(role, WRITE_MIN_ROLE)) return new Response(`forbidden: ${WRITE_MIN_ROLE} role required`, { status: 403 });
+  const min = writeMinRole(path);
+  if (!allowed(role, min)) return new Response(`forbidden: ${min} role required`, { status: 403 });
   const url = `/api/v1/${path.join("/")}${req.nextUrl.search}`;
   const body = await req.text();
   return passthrough(await goFetch(url, { method: "POST", body }));
+}
+
+export async function DELETE(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  const { path } = await ctx.params;
+  if (!validPath(path)) return new Response("bad request", { status: 400 });
+  const role = await operatorRole();
+  if (!role) return new Response("unauthorized", { status: 401 });
+  if (!allowed(role, WRITE_MIN_ROLE)) return new Response(`forbidden: ${WRITE_MIN_ROLE} role required`, { status: 403 });
+  const url = `/api/v1/${path.join("/")}${req.nextUrl.search}`;
+  return passthrough(await goFetch(url, { method: "DELETE" }));
 }

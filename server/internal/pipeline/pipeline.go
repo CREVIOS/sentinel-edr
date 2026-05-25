@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/sentinel/server/internal/behavior"
 	"github.com/sentinel/server/internal/bus"
+	"github.com/sentinel/server/internal/cases"
 	"github.com/sentinel/server/internal/detect"
 	"github.com/sentinel/server/internal/dlp"
 	"github.com/sentinel/server/internal/intel"
@@ -22,6 +23,7 @@ import (
 	"github.com/sentinel/server/internal/respond"
 	"github.com/sentinel/server/internal/store"
 	"github.com/sentinel/server/internal/transport"
+	"github.com/sentinel/server/internal/tune"
 )
 
 // Processor wires the detection/DLP/behavior engines to the store and transport.
@@ -34,6 +36,8 @@ type Processor struct {
 	bcast    transport.Broadcaster
 	intel    *intel.Engine
 	notify   *notify.Notifier
+	tune     *tune.Engine
+	cases    *cases.Correlator
 	log      *slog.Logger
 }
 
@@ -47,6 +51,12 @@ func (p *Processor) WithIntel(e *intel.Engine) *Processor { p.intel = e; return 
 
 // WithNotify attaches an alert notifier. Optional; nil → no external alerting.
 func (p *Processor) WithNotify(n *notify.Notifier) *Processor { p.notify = n; return p }
+
+// WithTuning attaches the detection-tuning engine. Optional; nil → no suppression/disable.
+func (p *Processor) WithTuning(t *tune.Engine) *Processor { p.tune = t; return p }
+
+// WithCases attaches the case correlator. Optional; nil → no auto case grouping.
+func (p *Processor) WithCases(c *cases.Correlator) *Processor { p.cases = c; return p }
 
 // StartProcessors subscribes the stateless detection/DLP consumer (queue group).
 func (p *Processor) StartProcessors(b bus.Bus) error {
@@ -153,6 +163,14 @@ func (p *Processor) runDLP(ev *model.Event) error {
 }
 
 func (p *Processor) emit(d *model.Detection, ev *model.Event, action string) error {
+	// Tuning: drop the finding before it is stored/alerted if the rule is disabled or a
+	// suppression matches. Suppressed findings never auto-respond.
+	if p.tune != nil {
+		if ok, reason := p.tune.Allowed(d); !ok {
+			p.log.Debug("detection tuned out", "rule", d.RuleID, "host", d.Hostname, "reason", reason)
+			return nil
+		}
+	}
 	if err := p.store.InsertDetection(d); err != nil {
 		p.log.Error("persist detection", "err", err)
 		return err
@@ -162,6 +180,14 @@ func (p *Processor) emit(d *model.Detection, ev *model.Event, action string) err
 	if p.respond != nil && action != "" {
 		if r := p.respond.AutoFromDetection(d, ev, action); r != nil {
 			p.log.Info("auto-response", "type", r.Type, "agent", r.AgentID, "status", r.Status)
+		}
+	}
+	// Incident correlation: fold this detection into an open case for the endpoint.
+	if p.cases != nil {
+		if c, err := p.cases.Add(d); err != nil {
+			p.log.Error("case correlation", "err", err)
+		} else if c != nil {
+			p.bcast.Broadcast("case", c)
 		}
 	}
 	return nil

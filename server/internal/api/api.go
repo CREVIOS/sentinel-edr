@@ -31,6 +31,7 @@ import (
 	"github.com/sentinel/server/internal/siem"
 	"github.com/sentinel/server/internal/store"
 	"github.com/sentinel/server/internal/transport"
+	"github.com/sentinel/server/internal/tune"
 )
 
 // Server holds the API dependencies.
@@ -44,6 +45,7 @@ type Server struct {
 	detect      *detect.Engine
 	dlp         *dlp.Engine
 	respond     *respond.Orchestrator
+	tune        *tune.Engine
 	limiter     *auth.Limiter
 	ingestLimit *auth.Limiter
 	log         *slog.Logger
@@ -61,6 +63,7 @@ type Deps struct {
 	Detect  *detect.Engine
 	DLP     *dlp.Engine
 	Respond *respond.Orchestrator
+	Tune    *tune.Engine
 	Log     *slog.Logger
 }
 
@@ -76,7 +79,7 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, auth: d.Auth, hub: d.Hub, bcast: bcast, bus: d.Bus,
-		detect: d.Detect, dlp: d.DLP, respond: d.Respond,
+		detect: d.Detect, dlp: d.DLP, respond: d.Respond, tune: d.Tune,
 		limiter:     auth.NewLimiter(5, 15),     // auth surface: 5 req/s, burst 15
 		ingestLimit: auth.NewLimiter(500, 1000), // ingest surface, per source IP
 		log:         d.Log,
@@ -127,6 +130,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/detections", s.auth.Require(auth.RoleViewer, s.listDetections))
 	mux.HandleFunc("GET /api/v1/responses", s.auth.Require(auth.RoleViewer, s.listResponses))
 	mux.HandleFunc("GET /api/v1/rules", s.auth.Require(auth.RoleViewer, s.listRules))
+	mux.HandleFunc("GET /api/v1/cases", s.auth.Require(auth.RoleViewer, s.listCases))
+	mux.HandleFunc("GET /api/v1/cases/{id}", s.auth.Require(auth.RoleViewer, s.getCase))
+	mux.HandleFunc("GET /api/v1/suppressions", s.auth.Require(auth.RoleViewer, s.listSuppressions))
 	mux.HandleFunc("GET /api/v1/dlp/policies", s.auth.Require(auth.RoleViewer, s.dlpPolicies))
 	mux.HandleFunc("GET /api/v1/dlp/classifiers", s.auth.Require(auth.RoleViewer, s.dlpClassifiers))
 	mux.HandleFunc("GET /api/v1/stats/overview", s.auth.Require(auth.RoleViewer, s.overview))
@@ -139,6 +145,16 @@ func (s *Server) Handler() http.Handler {
 	// fleet management (admin): push collection policy + verified agent self-update.
 	mux.HandleFunc("POST /api/v1/agents/{id}/policy", s.auth.Require(auth.RoleAdmin, s.pushPolicy))
 	mux.HandleFunc("POST /api/v1/agents/{id}/upgrade", s.auth.Require(auth.RoleAdmin, s.upgradeAgent))
+
+	// incident management (analyst): create / progress / annotate cases.
+	mux.HandleFunc("POST /api/v1/cases", s.auth.Require(auth.RoleAnalyst, s.createCase))
+	mux.HandleFunc("POST /api/v1/cases/{id}", s.auth.Require(auth.RoleAnalyst, s.updateCase))
+	mux.HandleFunc("POST /api/v1/cases/{id}/notes", s.auth.Require(auth.RoleAnalyst, s.addCaseNote))
+
+	// detection tuning: suppressions (analyst) + per-rule enable/disable (admin).
+	mux.HandleFunc("POST /api/v1/suppressions", s.auth.Require(auth.RoleAnalyst, s.createSuppression))
+	mux.HandleFunc("DELETE /api/v1/suppressions/{id}", s.auth.Require(auth.RoleAnalyst, s.deleteSuppression))
+	mux.HandleFunc("POST /api/v1/rules/{id}/toggle", s.auth.Require(auth.RoleAdmin, s.toggleRule))
 
 	// console live feed (JWT via Sec-WebSocket-Protocol)
 	mux.HandleFunc("GET /ws", s.consoleWS)
@@ -421,15 +437,296 @@ func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
 	type ruleDTO struct {
 		ID, Title, Severity, Category, Tactic, Description, AutoRespond string
 		MITRE                                                           []string
+		Enabled                                                         bool
+	}
+	disabled := map[string]bool{}
+	if s.tune != nil {
+		disabled = s.tune.DisabledRules()
 	}
 	var out []ruleDTO
 	for _, rl := range s.detect.Rules() {
 		out = append(out, ruleDTO{
 			ID: rl.ID, Title: rl.Title, Severity: string(rl.Severity), Category: string(rl.Category),
 			Tactic: rl.Tactic, Description: rl.Description, AutoRespond: rl.AutoRespond, MITRE: rl.MITRE,
+			Enabled: !disabled[rl.ID],
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// toggleRule enables/disables a detection rule fleet-wide (admin). Persisted + applied live.
+func (s *Server) toggleRule(w http.ResponseWriter, r *http.Request) {
+	if s.tune == nil {
+		http.Error(w, "tuning unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := readJSON(r, &req, 1<<14); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	o := &model.RuleOverride{
+		RuleID: id, Enabled: req.Enabled,
+		UpdatedBy: auth.UserFromContext(r.Context()), UpdatedAt: time.Now().UTC(),
+	}
+	if err := s.store.SetRuleOverride(o); err != nil {
+		serverError(w, err)
+		return
+	}
+	s.tune.SetRuleEnabled(id, req.Enabled)
+	writeJSON(w, http.StatusOK, o)
+}
+
+// listSuppressions returns all suppressions with their live hit counts.
+func (s *Server) listSuppressions(w http.ResponseWriter, r *http.Request) {
+	sp, err := s.store.ListSuppressions()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if s.tune != nil {
+		for i := range sp {
+			if h := s.tune.Hits(sp[i].ID); h > sp[i].Hits {
+				sp[i].Hits = h
+			}
+		}
+	}
+	if sp == nil {
+		sp = []model.Suppression{}
+	}
+	writeJSON(w, http.StatusOK, sp)
+}
+
+// createSuppression adds a tuning suppression (analyst). Validated, persisted, applied live.
+func (s *Server) createSuppression(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RuleID  string `json:"rule_id"`
+		Field   string `json:"field"`
+		Op      string `json:"op"`
+		Value   string `json:"value"`
+		Reason  string `json:"reason"`
+		Expires string `json:"expires"` // RFC3339, optional
+	}
+	if err := readJSON(r, &req, 1<<15); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	switch req.Field {
+	case "host", "user", "agent", "summary", "rule":
+	default:
+		http.Error(w, "field must be host|user|agent|summary|rule", http.StatusBadRequest)
+		return
+	}
+	if req.Op == "" {
+		req.Op = "equals"
+	}
+	if req.Op != "equals" && req.Op != "contains" {
+		http.Error(w, "op must be equals|contains", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Value) == "" {
+		http.Error(w, "value required", http.StatusBadRequest)
+		return
+	}
+	if req.RuleID == "" {
+		req.RuleID = "*"
+	}
+	sp := &model.Suppression{
+		ID: uuid.NewString(), RuleID: req.RuleID, Field: req.Field, Op: req.Op,
+		Value: req.Value, Reason: req.Reason,
+		CreatedBy: auth.UserFromContext(r.Context()), CreatedAt: time.Now().UTC(),
+	}
+	if req.Expires != "" {
+		if t, err := time.Parse(time.RFC3339, req.Expires); err == nil {
+			sp.Expires = &t
+		} else {
+			http.Error(w, "expires must be RFC3339", http.StatusBadRequest)
+			return
+		}
+	}
+	if err := s.store.InsertSuppression(sp); err != nil {
+		serverError(w, err)
+		return
+	}
+	if s.tune != nil {
+		s.tune.AddSuppression(*sp)
+	}
+	writeJSON(w, http.StatusOK, sp)
+}
+
+// deleteSuppression removes a suppression (analyst).
+func (s *Server) deleteSuppression(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.store.DeleteSuppression(id); err != nil {
+		serverError(w, err)
+		return
+	}
+	if s.tune != nil {
+		s.tune.RemoveSuppression(id)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": "deleted"})
+}
+
+// ---------- cases ----------
+
+func (s *Server) listCases(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	cs, err := s.store.ListCases(atoiDefault(r.URL.Query().Get("limit"), 200), status)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	if cs == nil {
+		cs = []model.Case{}
+	}
+	writeJSON(w, http.StatusOK, cs)
+}
+
+func (s *Server) getCase(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.GetCase(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// hydrate linked detections so the console can render the incident in one round-trip.
+	type caseDetail struct {
+		*model.Case
+		Detections []model.Detection `json:"detections"`
+	}
+	dets := make([]model.Detection, 0, len(c.DetectionIDs))
+	for _, id := range c.DetectionIDs {
+		if d, err := s.store.GetDetection(id); err == nil {
+			dets = append(dets, *d)
+		}
+	}
+	writeJSON(w, http.StatusOK, caseDetail{Case: c, Detections: dets})
+}
+
+// createCase opens a case manually, optionally seeding it with detections (analyst).
+func (s *Server) createCase(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title        string   `json:"title"`
+		Severity     string   `json:"severity"`
+		AgentID      string   `json:"agent_id"`
+		Hostname     string   `json:"hostname"`
+		DetectionIDs []string `json:"detection_ids"`
+	}
+	if err := readJSON(r, &req, 1<<16); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		http.Error(w, "title required", http.StatusBadRequest)
+		return
+	}
+	sev := model.Severity(req.Severity)
+	if sev.Rank() == 0 && sev != model.SevInfo {
+		sev = model.SevMedium
+	}
+	now := time.Now().UTC()
+	c := &model.Case{
+		ID: uuid.NewString(), Title: req.Title, Severity: sev, Status: model.CaseOpen,
+		AgentID: req.AgentID, Hostname: req.Hostname, DetectionIDs: req.DetectionIDs,
+		CreatedAt: now, UpdatedAt: now, CreatedBy: auth.UserFromContext(r.Context()),
+	}
+	// derive MITRE + host from any seeded detections
+	for _, id := range req.DetectionIDs {
+		if d, err := s.store.GetDetection(id); err == nil {
+			c.MITRE = mergeStrings(c.MITRE, d.MITRE)
+			if c.Hostname == "" {
+				c.Hostname, c.AgentID = d.Hostname, d.AgentID
+			}
+		}
+	}
+	if err := s.store.InsertCase(c); err != nil {
+		serverError(w, err)
+		return
+	}
+	s.bcast.Broadcast("case", c)
+	writeJSON(w, http.StatusOK, c)
+}
+
+// updateCase changes status / assignee / title (analyst).
+func (s *Server) updateCase(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.GetCase(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Status     string `json:"status"`
+		AssignedTo string `json:"assigned_to"`
+		Title      string `json:"title"`
+	}
+	if err := readJSON(r, &req, 1<<15); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.Status != "" {
+		switch model.CaseStatus(req.Status) {
+		case model.CaseOpen, model.CaseInvestigating, model.CaseContained, model.CaseClosed:
+			c.Status = model.CaseStatus(req.Status)
+		default:
+			http.Error(w, "invalid status", http.StatusBadRequest)
+			return
+		}
+	}
+	if req.AssignedTo != "" {
+		c.AssignedTo = req.AssignedTo
+	}
+	if req.Title != "" {
+		c.Title = req.Title
+	}
+	c.UpdatedAt = time.Now().UTC()
+	if err := s.store.InsertCase(c); err != nil {
+		serverError(w, err)
+		return
+	}
+	s.bcast.Broadcast("case", c)
+	writeJSON(w, http.StatusOK, c)
+}
+
+// addCaseNote appends a timestamped analyst note (analyst).
+func (s *Server) addCaseNote(w http.ResponseWriter, r *http.Request) {
+	c, err := s.store.GetCase(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := readJSON(r, &req, 1<<16); err != nil || strings.TrimSpace(req.Body) == "" {
+		http.Error(w, "note body required", http.StatusBadRequest)
+		return
+	}
+	c.Notes = append(c.Notes, model.CaseNote{
+		TS: time.Now().UTC(), Author: auth.UserFromContext(r.Context()), Body: req.Body,
+	})
+	c.UpdatedAt = time.Now().UTC()
+	if err := s.store.InsertCase(c); err != nil {
+		serverError(w, err)
+		return
+	}
+	s.bcast.Broadcast("case", c)
+	writeJSON(w, http.StatusOK, c)
+}
+
+// mergeStrings unions two string slices, dropping empties + dups (order-stable).
+func mergeStrings(a, b []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, x := range append(append([]string{}, a...), b...) {
+		if x == "" || seen[x] {
+			continue
+		}
+		seen[x] = true
+		out = append(out, x)
+	}
+	return out
 }
 
 func (s *Server) dlpPolicies(w http.ResponseWriter, r *http.Request) {

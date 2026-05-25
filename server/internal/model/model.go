@@ -243,6 +243,68 @@ type ResponseAction struct {
 	Automated   bool           `json:"automated"`
 }
 
+// ---------- incident / case management ----------
+
+// CaseStatus is the lifecycle of an investigation.
+type CaseStatus string
+
+const (
+	CaseOpen          CaseStatus = "open"
+	CaseInvestigating CaseStatus = "investigating"
+	CaseContained     CaseStatus = "contained"
+	CaseClosed        CaseStatus = "closed"
+)
+
+// CaseNote is a timestamped analyst note on a case.
+type CaseNote struct {
+	TS     time.Time `json:"ts"`
+	Author string    `json:"author"`
+	Body   string    `json:"body"`
+}
+
+// Case groups related detections into a single investigation. Detections are correlated
+// into an open case per endpoint within a time window, or analysts create/curate cases.
+type Case struct {
+	ID           string     `json:"id"`
+	Title        string     `json:"title"`
+	Severity     Severity   `json:"severity"`
+	Status       CaseStatus `json:"status"`
+	AssignedTo   string     `json:"assigned_to,omitempty"`
+	AgentID      string     `json:"agent_id,omitempty"`
+	Hostname     string     `json:"hostname,omitempty"`
+	DetectionIDs []string   `json:"detection_ids"`
+	MITRE        []string   `json:"mitre,omitempty"`
+	Notes        []CaseNote `json:"notes,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	CreatedBy    string     `json:"created_by,omitempty"`
+}
+
+// ---------- detection tuning ----------
+
+// Suppression silences detections that match a rule + field predicate, so known-benign
+// activity stops generating noise without disabling the rule globally.
+type Suppression struct {
+	ID        string     `json:"id"`
+	RuleID    string     `json:"rule_id"` // exact rule id, or "*" for any rule
+	Field     string     `json:"field"`   // host|user|agent|summary|rule
+	Op        string     `json:"op"`      // equals|contains
+	Value     string     `json:"value"`
+	Reason    string     `json:"reason,omitempty"`
+	CreatedBy string     `json:"created_by,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	Expires   *time.Time `json:"expires,omitempty"`
+	Hits      int64      `json:"hits"` // detections suppressed by this rule
+}
+
+// RuleOverride enables/disables a detection rule fleet-wide from the console.
+type RuleOverride struct {
+	RuleID    string    `json:"rule_id"`
+	Enabled   bool      `json:"enabled"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // Command is the message pushed to an agent over WebSocket.
 type Command struct {
 	ID     string         `json:"id"`

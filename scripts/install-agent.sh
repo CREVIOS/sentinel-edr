@@ -110,6 +110,9 @@ EnvironmentFile=-/etc/sentinel/agent.env
 ExecStart=/usr/local/bin/sentinel-agent
 Restart=always
 RestartSec=5
+# Self-protection: exempt from OOM killer (the agent must survive memory pressure to keep
+# enforcing) and harden the unit. Watchdog recovery via Restart=always.
+OOMScoreAdjust=-1000
 StateDirectory=sentinel
 Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json
 AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_KILL

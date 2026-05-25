@@ -120,6 +120,22 @@ async fn main() -> Result<()> {
     // path above if libpcap/CAP_NET_RAW are unavailable.
     dnssniff::spawn(dns.clone());
 
+    // In-kernel exec telemetry (real-time, no-miss): load the eBPF tracepoint when the host
+    // supports it and we were built with --features ebpf. Drained into each batch below; the
+    // polling collectors still run, so a load failure degrades gracefully.
+    #[cfg(feature = "ebpf")]
+    let ebpf_sink: Option<ebpf::loader::Sink> = if tier == ebpf::Tier::Ebpf {
+        match ebpf::loader::load_and_run().await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                warn!(error = %e, "eBPF load failed; continuing on the polling tier");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // --- collectors ---
     let mut proc_c = collectors::ProcessCollector::new();
     let mut login_c = collectors::LoginCollector::new();
@@ -186,6 +202,13 @@ async fn main() -> Result<()> {
         batch.extend(module_c.poll());
         batch.extend(rootkit_c.poll());
         batch.extend(posture_c.poll());
+        // fold in any eBPF-captured exec events accumulated since the last tick
+        #[cfg(feature = "ebpf")]
+        if let Some(s) = &ebpf_sink {
+            if let Ok(mut q) = s.lock() {
+                batch.append(&mut q);
+            }
+        }
         // package scan is heavier; run every ~12 ticks
         pkg_interval += 1;
         if pkg_interval >= 12 {

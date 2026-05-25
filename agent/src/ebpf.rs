@@ -136,88 +136,80 @@ pub mod loader {
             .unwrap_or_default()
     }
 
-    /// fnv-1a — MUST match the kernel program's hash so blocklist keys line up.
-    pub fn fnv1a(bytes: &[u8]) -> u64 {
-        let mut h: u64 = 0xcbf29ce484222325;
-        for &b in bytes {
-            h ^= b as u64;
-            h = h.wrapping_mul(0x100000001b3);
-        }
-        h
-    }
-
     /// Path to the compiled kernel object, shipped alongside the agent. Loaded at runtime (not
     /// `include_bytes!`) so the agent binary builds without the object present.
     const OBJECT_PATH: &str = "/usr/lib/sentinel/sentinel-ebpf.o";
 
-    /// Handle to the loaded programs + their control maps.
-    pub struct Loaded {
-        bpf: aya::Ebpf,
-    }
+    /// Shared queue the per-CPU drain tasks push parsed events into; the agent loop drains it
+    /// each tick and folds the events into the outgoing batch.
+    pub type Sink = std::sync::Arc<std::sync::Mutex<Vec<Event>>>;
 
-    /// Load the object, attach both programs (exec tracepoint + bprm LSM), and return a handle.
-    /// Telemetry flows immediately; enforcement stays disarmed until `set_enforce(true)`.
-    pub fn load() -> anyhow::Result<Loaded> {
+    /// Load the object, attach the exec tracepoint, spawn async per-CPU perf drains, and return
+    /// the sink. The bprm LSM is attached best-effort (no-op without `lsm=bpf` at boot). The
+    /// Ebpf handle is intentionally leaked so the programs stay attached for the agent's life.
+    pub async fn load_and_run() -> anyhow::Result<Sink> {
+        use aya::maps::AsyncPerfEventArray;
+        use aya::programs::TracePoint;
+        use aya::util::online_cpus;
+        use bytes::BytesMut;
+        use std::sync::{Arc, Mutex};
+
         let mut bpf = aya::Ebpf::load_file(OBJECT_PATH)?;
-        // exec telemetry tracepoint
-        let tp: &mut aya::programs::TracePoint = bpf
+        let tp: &mut TracePoint = bpf
             .program_mut("sched_process_exec")
             .ok_or_else(|| anyhow::anyhow!("missing sched_process_exec program"))?
             .try_into()?;
         tp.load()?;
         tp.attach("sched", "sched_process_exec")?;
-        // LSM exec gate (kernel must be built with BPF LSM in lsm= boot param)
         if let Some(p) = bpf.program_mut("bprm_check_security") {
-            let lsm: &mut aya::programs::Lsm = p.try_into()?;
-            // attach requires the kernel btf; best-effort so telemetry still works without LSM.
-            if let Err(e) = lsm.load().and_then(|_| lsm.attach()) {
-                tracing::warn!(error = %e, "LSM exec-gate unavailable (kernel lacks BPF LSM?)");
+            if let Ok(lsm) = TryInto::<&mut aya::programs::Lsm>::try_into(p) {
+                // best-effort: needs kernel BTF + `lsm=…,bpf` at boot. Telemetry works regardless.
+                match aya::Btf::from_sys_fs() {
+                    Ok(btf) => {
+                        if let Err(e) = lsm.load("bprm_check_security", &btf) {
+                            tracing::warn!(error = %e, "LSM exec-gate load failed");
+                        } else if let Err(e) = lsm.attach() {
+                            tracing::warn!(error = %e, "LSM exec-gate not attached (kernel lacks lsm=bpf)");
+                        }
+                    }
+                    Err(e) => tracing::warn!(error = %e, "no kernel BTF; LSM exec-gate skipped"),
+                }
             }
         }
-        Ok(Loaded { bpf })
-    }
 
-    impl Loaded {
-        /// Arm/disarm in-kernel exec enforcement (writes the ENFORCE single-slot array).
-        pub fn set_enforce(&mut self, on: bool) -> anyhow::Result<()> {
-            let mut arr: aya::maps::Array<_, u32> = aya::maps::Array::try_from(
-                self.bpf
-                    .map_mut("ENFORCE")
-                    .ok_or_else(|| anyhow::anyhow!("missing ENFORCE map"))?,
-            )?;
-            arr.set(0, if on { 1 } else { 0 }, 0)?;
-            Ok(())
+        let sink: Sink = Arc::new(Mutex::new(Vec::new()));
+        let mut perf = AsyncPerfEventArray::try_from(
+            bpf.take_map("EXEC_EVENTS")
+                .ok_or_else(|| anyhow::anyhow!("missing EXEC_EVENTS map"))?,
+        )?;
+        let cpus = online_cpus().map_err(|e| anyhow::anyhow!("online_cpus: {e:?}"))?;
+        let ncpu = cpus.len();
+        for cpu in cpus {
+            let mut buf = perf.open(cpu, None)?;
+            let sink = sink.clone();
+            tokio::spawn(async move {
+                let mut bufs = (0..16).map(|_| BytesMut::with_capacity(256)).collect::<Vec<_>>();
+                loop {
+                    let events = match buf.read_events(&mut bufs).await {
+                        Ok(e) => e,
+                        Err(_) => break,
+                    };
+                    for b in bufs.iter().take(events.read) {
+                        if b.len() >= core::mem::size_of::<ExecEvent>() {
+                            let e =
+                                unsafe { std::ptr::read_unaligned(b.as_ptr() as *const ExecEvent) };
+                            if let Ok(mut q) = sink.lock() {
+                                q.push(to_event(&e));
+                            }
+                        }
+                    }
+                }
+            });
         }
-
-        /// Add an absolute path to the in-kernel exec blocklist.
-        pub fn block_path(&mut self, path: &str) -> anyhow::Result<()> {
-            let mut m: aya::maps::HashMap<_, u64, u8> = aya::maps::HashMap::try_from(
-                self.bpf
-                    .map_mut("BLOCKED_EXEC")
-                    .ok_or_else(|| anyhow::anyhow!("missing BLOCKED_EXEC map"))?,
-            )?;
-            m.insert(fnv1a(path.as_bytes()), 1u8, 0)?;
-            Ok(())
-        }
-
-        /// Remove a path from the exec blocklist.
-        pub fn unblock_path(&mut self, path: &str) -> anyhow::Result<()> {
-            let mut m: aya::maps::HashMap<_, u64, u8> = aya::maps::HashMap::try_from(
-                self.bpf
-                    .map_mut("BLOCKED_EXEC")
-                    .ok_or_else(|| anyhow::anyhow!("missing BLOCKED_EXEC map"))?,
-            )?;
-            let _ = m.remove(&fnv1a(path.as_bytes()));
-            Ok(())
-        }
-
-        /// Borrow the EXEC_EVENTS perf array for draining (see docs/EBPF.md for the per-CPU
-        /// read loop; kept out of the hot default build because it pulls bytes/perf plumbing).
-        pub fn exec_events(&mut self) -> Option<&mut aya::maps::MapData> {
-            // Drain wiring is documented in docs/EBPF.md; verified on a BTF host.
-            let _ = &mut self.bpf;
-            None
-        }
+        // keep programs + maps alive for the process lifetime
+        std::mem::forget(bpf);
+        tracing::info!(cpus = ncpu, "eBPF exec telemetry attached");
+        Ok(sink)
     }
 }
 

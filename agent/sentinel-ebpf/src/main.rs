@@ -76,11 +76,21 @@ fn try_exec(ctx: &TracePointContext) -> Result<(), i64> {
     if let Ok(comm) = bpf_get_current_comm() {
         ev.comm = comm;
     }
-    // filename: the sched_process_exec tracepoint stores the path via a __data_loc field whose
-    // offset is kernel-version-specific; the userspace loader resolves it via BTF (CO-RE) and
-    // the bounded read is patched in before attach. Placeholder bounded read keeps the verifier
-    // happy until that CO-RE relocation is wired on the target kernel.
-    let _ = unsafe { ctx.read_at::<u32>(8) };
+    // The sched/sched_process_exec tracepoint format stores the path as a __data_loc field at
+    // offset 8: a u32 whose low 16 bits are the byte offset of the (NUL-terminated) string
+    // within the event record. Read that, then copy the path with a bounded loop the verifier
+    // can prove safe.
+    let dloc: u32 = unsafe { ctx.read_at::<u32>(8) }.unwrap_or(0);
+    let foff = (dloc & 0xffff) as usize;
+    if foff != 0 {
+        for i in 0..(ev.filename.len() - 1) {
+            let c: u8 = unsafe { ctx.read_at::<u8>(foff + i) }.unwrap_or(0);
+            ev.filename[i] = c;
+            if c == 0 {
+                break;
+            }
+        }
+    }
     EXEC_EVENTS.output(ctx, &ev, 0);
     Ok(())
 }

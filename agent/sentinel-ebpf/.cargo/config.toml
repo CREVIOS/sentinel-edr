@@ -1,0 +1,8 @@
+# The BPF target ships no prebuilt std, so core must be built from source (needs the rust-src
+# component from the pinned nightly in rust-toolchain.toml). Setting the target here means a
+# plain `cargo build --release` produces the bpfel object.
+[build]
+target = "bpfel-unknown-none"
+
+[unstable]
+build-std = ["core"]

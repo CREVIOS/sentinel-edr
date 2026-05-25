@@ -71,13 +71,30 @@ func main() {
 	}
 	dlpEng := dlp.New()
 
-	// Threat-intel IOC engine (optional). Loads hash/ip/domain feeds from SENTINEL_IOC_DIR.
+	// Threat-intel IOC engine (optional). Loads hash/ip/domain indicators from a local feed
+	// directory (SENTINEL_IOC_DIR) and/or live remote feeds (SENTINEL_IOC_FEEDS), the latter
+	// auto-refreshed every SENTINEL_IOC_REFRESH_MINS so new abuse.ch/OTX intel lands without a
+	// restart.
 	intelEng := intel.New()
-	if cfg.IOCDir != "" {
-		if n, err := intelEng.LoadDir(cfg.IOCDir); err != nil {
-			log.Warn("ioc feeds", "err", err, "dir", cfg.IOCDir)
+	if cfg.IOCDir != "" || len(cfg.IOCFeeds) > 0 {
+		intelEng.Sources(cfg.IOCDir, cfg.IOCFeeds)
+		if n, err := intelEng.Refresh(); err != nil {
+			log.Warn("ioc feeds", "err", err, "indicators", n)
 		} else {
-			log.Info("ioc feeds loaded", "indicators", n)
+			log.Info("ioc feeds loaded", "indicators", n, "feeds", len(cfg.IOCFeeds))
+		}
+		if len(cfg.IOCFeeds) > 0 && cfg.IOCRefresh > 0 {
+			go func() {
+				t := time.NewTicker(time.Duration(cfg.IOCRefresh) * time.Minute)
+				defer t.Stop()
+				for range t.C {
+					if n, err := intelEng.Refresh(); err != nil {
+						log.Warn("ioc refresh", "err", err, "indicators", n)
+					} else {
+						log.Info("ioc refreshed", "indicators", n)
+					}
+				}
+			}()
 		}
 	}
 

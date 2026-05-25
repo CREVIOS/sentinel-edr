@@ -67,6 +67,11 @@ services:
       SENTINEL_ADMIN_USER: ${SENTINEL_ADMIN_USER}
       SENTINEL_ADMIN_PASS: ${SENTINEL_ADMIN_PASS}
       SENTINEL_TRUSTED_PROXIES: 172.16.0.0/12,10.0.0.0/8
+      # Live threat-intel feeds (abuse.ch botnet/C2 IP blocklists — bare-IP lists, low FP).
+      # Refreshed every 2h so new C2 infrastructure lands without a restart. These only raise
+      # detections on a match; they never block traffic.
+      SENTINEL_IOC_FEEDS: https://feodotracker.abuse.ch/downloads/ipblocklist.txt,https://sslbl.abuse.ch/blacklist/sslipblacklist.txt
+      SENTINEL_IOC_REFRESH_MINS: "120"
     # NOT on global-proxy: :8080 serves console/respond/login/ws too, which must not be
     # reachable by co-tenant containers on the shared network. The host nginx instead joins
     # sentinel_internal (one-time: `docker network connect sentinel_internal <nginx>`), so it

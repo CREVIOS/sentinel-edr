@@ -7,7 +7,11 @@ package intel
 
 import (
 	"bufio"
+	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,11 +44,28 @@ type Engine struct {
 	domains  map[string]indicator
 	loadedAt time.Time
 	count    int
+
+	dir  string       // local feed directory (optional)
+	urls []string     // remote feed URLs (optional)
+	http *http.Client // for URL feeds
 }
 
 // New returns an empty engine.
 func New() *Engine {
-	return &Engine{hashes: map[string]indicator{}, ips: map[string]indicator{}, domains: map[string]indicator{}}
+	return &Engine{
+		hashes:  map[string]indicator{},
+		ips:     map[string]indicator{},
+		domains: map[string]indicator{},
+		http:    &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// Sources configures the feed inputs used by Refresh. A local directory of feed files and/or a
+// list of remote feed URLs (abuse.ch/OTX/newline lists). Call Refresh to (re)load from them.
+func (e *Engine) Sources(dir string, urls []string) {
+	e.mu.Lock()
+	e.dir, e.urls = dir, urls
+	e.mu.Unlock()
 }
 
 // Count returns how many indicators are loaded.
@@ -54,7 +75,7 @@ func (e *Engine) Count() int {
 	return e.count
 }
 
-// LoadDir reads every *.txt / *.csv / *.ioc file in dir and replaces the indicator set.
+// LoadDir sets dir as the local feed source and loads it (plus any configured URL feeds).
 // Line formats accepted:
 //
 //	<value>                                  (type auto-detected, severity=high)
@@ -62,13 +83,55 @@ func (e *Engine) Count() int {
 //
 // Lines beginning with '#' or blank are ignored. The filename (sans ext) is the default source.
 func (e *Engine) LoadDir(dir string) (int, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0, err
-	}
+	e.mu.Lock()
+	e.dir = dir
+	e.mu.Unlock()
+	return e.Refresh()
+}
+
+// Refresh rebuilds the indicator set from the configured local directory and remote URL feeds,
+// then swaps it in atomically so matching never blocks on a feed update. URL-fetch failures are
+// returned but do not discard indicators gathered from the other sources — partial intel beats
+// none. Returns the resulting indicator count.
+func (e *Engine) Refresh() (int, error) {
+	e.mu.RLock()
+	dir, urls := e.dir, append([]string(nil), e.urls...)
+	e.mu.RUnlock()
+
 	h := map[string]indicator{}
 	ip := map[string]indicator{}
 	dom := map[string]indicator{}
+	var errs []string
+
+	if dir != "" {
+		if err := scanDir(dir, h, ip, dom); err != nil {
+			errs = append(errs, fmt.Sprintf("dir %s: %v", dir, err))
+		}
+	}
+	for _, u := range urls {
+		if err := e.fetchURL(u, h, ip, dom); err != nil {
+			errs = append(errs, fmt.Sprintf("feed %s: %v", u, err))
+		}
+	}
+
+	e.mu.Lock()
+	e.hashes, e.ips, e.domains = h, ip, dom
+	e.count = len(h) + len(ip) + len(dom)
+	e.loadedAt = time.Now()
+	cnt := e.count
+	e.mu.Unlock()
+	if len(errs) > 0 {
+		return cnt, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return cnt, nil
+}
+
+// scanDir reads every *.txt / *.csv / *.ioc file in dir into the indicator maps.
+func scanDir(dir string, h, ip, dom map[string]indicator) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
 	for _, ent := range entries {
 		if ent.IsDir() {
 			continue
@@ -89,13 +152,37 @@ func (e *Engine) LoadDir(dir string) (int, error) {
 		}
 		f.Close()
 	}
-	e.mu.Lock()
-	e.hashes, e.ips, e.domains = h, ip, dom
-	e.count = len(h) + len(ip) + len(dom)
-	e.loadedAt = time.Now()
-	cnt := e.count
-	e.mu.Unlock()
-	return cnt, nil
+	return nil
+}
+
+// fetchURL downloads one remote feed and parses it line-by-line. Works with plain newline lists
+// (abuse.ch Feodo/SSLBL, URLhaus) where each line is a bare indicator with '#' comments; the
+// per-line CSV form (value,type,severity,source) is honoured too. The feed host is the default
+// source label. Capped at 32 MiB to bound a hostile/huge response.
+func (e *Engine) fetchURL(feed string, h, ip, dom map[string]indicator) error {
+	req, err := http.NewRequest(http.MethodGet, feed, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "sentinel-edr/intel")
+	resp, err := e.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	src := feed
+	if u, err := url.Parse(feed); err == nil && u.Host != "" {
+		src = u.Host
+	}
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, 32<<20))
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for sc.Scan() {
+		addLine(sc.Text(), src, h, ip, dom)
+	}
+	return sc.Err()
 }
 
 func addLine(line, defSrc string, h, ip, dom map[string]indicator) {

@@ -1,6 +1,8 @@
 package intel
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +57,56 @@ func TestNoFalsePositive(t *testing.T) {
 	e := loadEngine(t)
 	if d := e.Match(&model.Event{ID: "e", File: &model.FileInfo{Hash: "deadbeef"}, Network: &model.NetInfo{Remote: "8.8.8.8:53", Domain: "good.example.com"}}); len(d) != 0 {
 		t.Fatalf("unexpected match: %+v", d)
+	}
+}
+
+func TestURLFeedAndRefresh(t *testing.T) {
+	// abuse.ch-style plain newline list with '#' comments and bare indicators.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("# Feodo Tracker style\n203.0.113.99\nbad.feed.test\n"))
+	}))
+	defer srv.Close()
+
+	// local dir feed merged with the remote feed.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "local.ioc"), []byte("198.51.100.7,ip,high,local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New()
+	e.Sources(dir, []string{srv.URL})
+	n, err := e.Refresh()
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if n != 3 { // local ip + remote ip + remote domain
+		t.Fatalf("want 3 indicators, got %d", n)
+	}
+	if len(e.Match(&model.Event{ID: "e", Network: &model.NetInfo{Remote: "203.0.113.99:80"}})) != 1 {
+		t.Fatal("remote-feed ip not matched")
+	}
+	if len(e.Match(&model.Event{ID: "e", Network: &model.NetInfo{Domain: "bad.feed.test"}})) != 1 {
+		t.Fatal("remote-feed domain not matched")
+	}
+	if len(e.Match(&model.Event{ID: "e", Network: &model.NetInfo{Remote: "198.51.100.7:22"}})) != 1 {
+		t.Fatal("local-dir ip not matched after merge")
+	}
+}
+
+func TestURLFeedErrorKeepsOtherSources(t *testing.T) {
+	// A dead feed URL must not wipe indicators gathered from the working source.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "local.ioc"), []byte("c2.evil.test,domain,high,local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := New()
+	e.Sources(dir, []string{"http://127.0.0.1:1/nope"})
+	n, err := e.Refresh()
+	if err == nil {
+		t.Fatal("expected error from dead feed")
+	}
+	if n != 1 {
+		t.Fatalf("partial intel lost: want 1, got %d", n)
 	}
 }
 

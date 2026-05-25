@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -21,16 +22,18 @@ type Config struct {
 	JWTSecret    string // HMAC secret for console JWTs
 	EnrollToken  string // shared secret required to enroll a new agent
 	AdminUser    string
-	AdminPass    string // bootstrap admin password (bcrypt-hashed at startup)
-	TLSCert      string // path to server TLS cert (enables HTTPS)
-	TLSKey       string // path to server TLS key
-	TLSClientCA  string // path to CA that signs agent client certs (enables mTLS)
-	BehindProxy  bool   // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
-	RulesDir     string // directory of Sigma-style YAML rules
-	IOCDir       string // directory of threat-intel IOC feed files (hash/ip/domain)
-	AlertWebhook string // webhook URL for detection alerts ("" disables)
-	AlertKind    string // slack | discord | generic
-	AlertMinSev  string // minimum severity to alert (default high)
+	AdminPass    string   // bootstrap admin password (bcrypt-hashed at startup)
+	TLSCert      string   // path to server TLS cert (enables HTTPS)
+	TLSKey       string   // path to server TLS key
+	TLSClientCA  string   // path to CA that signs agent client certs (enables mTLS)
+	BehindProxy  bool     // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
+	RulesDir     string   // directory of Sigma-style YAML rules
+	IOCDir       string   // directory of threat-intel IOC feed files (hash/ip/domain)
+	IOCFeeds     []string // remote IOC feed URLs (abuse.ch/OTX/newline lists), refreshed live
+	IOCRefresh   int      // minutes between IOC feed refreshes (0 = no auto-refresh)
+	AlertWebhook string   // webhook URL for detection alerts ("" disables)
+	AlertKind    string   // slack | discord | generic
+	AlertMinSev  string   // minimum severity to alert (default high)
 	// Email (SMTP) alert sink — enabled when host+from+to are all set.
 	SMTPHost       string
 	SMTPPort       string
@@ -85,6 +88,14 @@ func Load() *Config {
 	if p := env("SENTINEL_TRUSTED_PROXIES", ""); p != "" {
 		c.TrustedProxies = strings.Split(p, ",")
 	}
+	if f := env("SENTINEL_IOC_FEEDS", ""); f != "" {
+		for _, u := range strings.Split(f, ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				c.IOCFeeds = append(c.IOCFeeds, u)
+			}
+		}
+	}
+	c.IOCRefresh = envInt("SENTINEL_IOC_REFRESH_MINS", 60)
 	// In development, generate ephemeral secrets so the stack "just works".
 	// In production, Validate() refuses to start unless every secret is supplied.
 	if !c.IsProduction() {
@@ -143,6 +154,15 @@ func (c *Config) RunsRole(role string) bool { return c.Role == "all" || c.Role =
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return def
+}
+
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+			return n
+		}
 	}
 	return def
 }

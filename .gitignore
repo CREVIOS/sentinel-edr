@@ -25,3 +25,4 @@ dashboard/out/
 dashboard/.env*
 .env.local
 *.log
+agent/sentinel-ebpf/target/

@@ -963,23 +963,26 @@ impl FimCollector {
                 if self.first {
                     continue;
                 }
-                match prev {
-                    None => out.push(self.file_event(&path, "create", size as i64, &sig)),
-                    Some(old) if old != sig => {
-                        let mut ev = self.file_event(&path, "write", size as i64, &sig);
-                        // DLP content inspection on change
-                        if size <= self.max_scan_bytes as u64 {
-                            if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                                if let Some(dev) = dlp_event_for(&path, &content) {
-                                    out.push(dev);
-                                }
-                            }
-                        }
-                        ev.severity = bump_for_path(&path);
-                        out.push(ev);
+                // Skip unchanged files; emit on create OR modify.
+                if let Some(old) = &prev {
+                    if *old == sig {
+                        continue;
                     }
-                    _ => {}
                 }
+                let op = if prev.is_none() { "create" } else { "write" };
+                // DLP content inspection runs on BOTH create and modify — a freshly-dropped
+                // file with secrets (exfil staging) must be caught, not only edits to existing
+                // files.
+                if size <= self.max_scan_bytes as u64 {
+                    if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                        if let Some(dev) = dlp_event_for(&path, &content) {
+                            out.push(dev);
+                        }
+                    }
+                }
+                let mut ev = self.file_event(&path, op, size as i64, &sig);
+                ev.severity = bump_for_path(&path);
+                out.push(ev);
             }
         }
         if !self.first {

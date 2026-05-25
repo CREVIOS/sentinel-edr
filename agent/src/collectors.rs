@@ -718,29 +718,56 @@ impl RootkitCollector {
 }
 
 #[cfg(target_os = "linux")]
-fn hidden_pids() -> Vec<i32> {
-    let visible: HashSet<i32> = std::fs::read_dir("/proc")
+fn proc_pids() -> HashSet<i32> {
+    std::fs::read_dir("/proc")
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| e.file_name().to_string_lossy().parse::<i32>().ok())
-        .collect();
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn pid_alive(pid: i32) -> bool {
+    // kill(pid,0): Ok or EPERM => exists; ESRCH => doesn't.
+    let r = unsafe { libc::kill(pid, 0) };
+    r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(target_os = "linux")]
+fn hidden_pids() -> Vec<i32> {
+    let visible = proc_pids();
     // bound the sweep so it stays cheap (kill(2) is fast but pid_max can be millions)
     let max = std::fs::read_to_string("/proc/sys/kernel/pid_max")
         .ok()
         .and_then(|s| s.trim().parse::<i32>().ok())
         .unwrap_or(65536)
         .min(131072);
-    let mut hidden = Vec::new();
+    // Pass 1: candidates that are kill-reachable but absent from the initial /proc snapshot.
+    let mut candidates = Vec::new();
     for pid in 2..=max {
-        // kill(pid,0): Ok or EPERM => process exists; ESRCH => it doesn't.
-        let r = unsafe { libc::kill(pid, 0) };
-        let exists = r == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
-        if exists && !visible.contains(&pid) {
-            hidden.push(pid);
+        if pid_alive(pid) && !visible.contains(&pid) {
+            candidates.push(pid);
         }
     }
-    hidden
+    if candidates.is_empty() {
+        return candidates;
+    }
+    // Confirmation pass: a genuine getdents-hook hidden PID stays alive AND absent across a
+    // FRESH /proc read + a re-stat of /proc/<pid> + a re-check of kill(2). A PID that merely
+    // spawned during pass 1 (TOCTOU race) will now appear in /proc — drop it. Eliminates the
+    // fork/exit race that otherwise fires false "rootkit" criticals on every busy host.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let visible2 = proc_pids();
+    candidates
+        .into_iter()
+        .filter(|&pid| {
+            pid_alive(pid)
+                && !visible2.contains(&pid)
+                && !std::path::Path::new(&format!("/proc/{pid}")).exists()
+                && !std::path::Path::new(&format!("/proc/{pid}/stat")).exists()
+        })
+        .collect()
 }
 #[cfg(not(target_os = "linux"))]
 fn hidden_pids() -> Vec<i32> {

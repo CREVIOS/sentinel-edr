@@ -96,26 +96,33 @@ EOF
 chmod 600 "$ETC/agent.env"
 log "wrote $ETC/agent.env"
 
-# --- 4) systemd service (always-on, restart on crash + reboot) ---
+# --- 4) systemd service + self-healing guardian (always-on; survives kill/stop/disable/mask) ---
 if command -v systemctl >/dev/null 2>&1; then
   cat > /etc/systemd/system/sentinel-agent.service <<'UNIT'
 [Unit]
 Description=Sentinel Endpoint Agent (EDR/DLP)
 After=network-online.target
 Wants=network-online.target
+# Never stop trying to restart, no matter how fast it dies (an attacker SIGKILL-looping the
+# agent can't exhaust a start-limit and make systemd give up).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 EnvironmentFile=-/etc/sentinel/agent.env
 ExecStart=/usr/local/bin/sentinel-agent
+# Resurrect on ANY exit (crash or SIGKILL) within ~1s.
 Restart=always
-RestartSec=5
-# Self-protection: exempt from OOM killer (the agent must survive memory pressure to keep
-# enforcing) and harden the unit. Watchdog recovery via Restart=always.
+RestartSec=1
+# Mutual resurrection: each time the agent starts, make sure the guardian timer is armed —
+# so if someone stops/disables the guardian, the next agent start re-arms it (and the guardian
+# does the same for the agent). To keep both dead an attacker must stop+mask BOTH at once.
+ExecStartPre=-/usr/bin/systemctl enable --now sentinel-guard.timer
+# Self-protection: exempt from OOM killer so the agent survives memory pressure.
 OOMScoreAdjust=-1000
 StateDirectory=sentinel
 Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_KILL CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_KILL CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_BPF CAP_PERFMON CAP_NET_RAW
 # An EDR must read AND act (quarantine) on files fleet-wide, so /home must be writable; the
 # responder itself refuses to touch system-critical paths (/usr,/etc,/boot,...). ProtectSystem
 # stays at full so /usr,/boot,/etc remain read-only at the unit level (defence in depth).
@@ -125,9 +132,37 @@ ProtectSystem=full
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+  # Guardian: a oneshot that revives the agent if it was stopped/disabled/masked (Restart=always
+  # only covers crash/kill, NOT `systemctl stop|disable|mask`). Driven by a timer every 15s.
+  cat > /etc/systemd/system/sentinel-guard.service <<'GUNIT'
+[Unit]
+Description=Sentinel Agent Guardian (revives the agent if disabled/stopped/masked)
+
+[Service]
+Type=oneshot
+# unmask (in case someone masked it) → ensure enabled → ensure running.
+ExecStart=/bin/sh -c '/usr/bin/systemctl is-active --quiet sentinel-agent || { /usr/bin/systemctl unmask sentinel-agent 2>/dev/null; /usr/bin/systemctl enable --now sentinel-agent; }'
+GUNIT
+
+  cat > /etc/systemd/system/sentinel-guard.timer <<'TUNIT'
+[Unit]
+Description=Sentinel Agent Guardian timer
+
+[Timer]
+OnBootSec=15
+OnUnitInactiveSec=15
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TUNIT
+
   systemctl daemon-reload
   systemctl enable --now sentinel-agent
-  log "service enabled — status:"
+  systemctl enable --now sentinel-guard.timer
+  log "service + self-healing guardian enabled — status:"
   systemctl --no-pager --lines=0 status sentinel-agent || true
 else
   log "no systemd; start manually: SENTINEL_STATE=/var/lib/sentinel/agent.json $BIN"

@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::net::UdpSocket;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "sentinel-agent", version, about = "Sentinel endpoint agent")]
@@ -116,6 +117,80 @@ impl AgentState {
         write_private(path, &data).context("write state")?;
         Ok(())
     }
+}
+
+/// Runtime-mutable policy. Seeded from CLI flags at boot, overridden by a persisted
+/// `policy.json` (so a console push survives restarts), and hot-reloaded when the server
+/// sends an `update_policy` command. Shared (read) by the collector loop and (write) by the
+/// command responder via [`SharedPolicy`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentPolicy {
+    /// Permit real enforcement actions (isolate/disable/quarantine/self-update).
+    pub enforce: bool,
+    /// Run DLP content inspection on watched files.
+    pub dlp_enabled: bool,
+    /// Stop emitting telemetry (heartbeats still flow so the agent shows online).
+    pub paused: bool,
+    /// Collection interval in seconds (clamped 1..=3600 on apply).
+    pub interval_secs: u64,
+    /// Directories watched for file-integrity monitoring.
+    pub watch: Vec<String>,
+}
+
+impl AgentPolicy {
+    /// Seed a policy from the boot-time CLI flags.
+    pub fn from_cli(cli: &Cli) -> Self {
+        Self {
+            enforce: cli.enforce,
+            dlp_enabled: true,
+            paused: false,
+            interval_secs: cli.interval.max(1),
+            watch: parse_csv(&cli.watch),
+        }
+    }
+
+    /// Policy lives next to the enrollment state so both share the 0600/0700 private dir.
+    pub fn path(state_path: &Path) -> PathBuf {
+        state_path.with_file_name("policy.json")
+    }
+
+    /// Load a persisted policy if present (a prior console push).
+    pub fn load(path: &Path) -> Option<AgentPolicy> {
+        let data = std::fs::read(path).ok()?;
+        serde_json::from_slice(&data).ok()
+    }
+
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+            set_private_dir(parent).ok();
+        }
+        let data = serde_json::to_vec_pretty(self)?;
+        write_private(&path.to_path_buf(), &data).context("write policy")?;
+        Ok(())
+    }
+}
+
+/// Thread-safe handle to the live policy.
+pub type SharedPolicy = Arc<RwLock<AgentPolicy>>;
+
+/// Build a shared policy: CLI defaults, overlaid with any persisted console push.
+pub fn shared_policy(cli: &Cli, state_path: &Path) -> SharedPolicy {
+    let mut p = AgentPolicy::from_cli(cli);
+    if let Some(saved) = AgentPolicy::load(&AgentPolicy::path(state_path)) {
+        // a persisted push wins for the operator-tunable knobs; watch falls back to CLI
+        // when the persisted list is empty so a bad push can't blind FIM entirely.
+        p.enforce = saved.enforce;
+        p.dlp_enabled = saved.dlp_enabled;
+        p.paused = saved.paused;
+        if saved.interval_secs >= 1 && saved.interval_secs <= 3600 {
+            p.interval_secs = saved.interval_secs;
+        }
+        if !saved.watch.is_empty() {
+            p.watch = saved.watch;
+        }
+    }
+    Arc::new(RwLock::new(p))
 }
 
 /// Static host identity reported at enrollment.

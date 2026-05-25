@@ -42,7 +42,11 @@ impl Enforcement {
 }
 
 pub struct Responder {
-    pub enforce: bool,
+    /// Live policy (shared with collectors). The `enforce` gate is read from here so a
+    /// console `update_policy` can arm/disarm enforcement fleet-wide without a restart.
+    pub policy: crate::config::SharedPolicy,
+    /// Where to persist a pushed policy so it survives restart.
+    pub policy_path: PathBuf,
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub server_host: String,
     pub flags: Enforcement,
@@ -51,17 +55,24 @@ pub struct Responder {
 
 impl Responder {
     pub fn new(
-        enforce: bool,
+        policy: crate::config::SharedPolicy,
+        policy_path: PathBuf,
         server_host: String,
         flags: Enforcement,
         audit_path: PathBuf,
     ) -> Self {
         Responder {
-            enforce,
+            policy,
+            policy_path,
             server_host,
             flags,
             audit_path,
         }
+    }
+
+    /// Current enforcement gate (poisoned lock fails closed).
+    fn enforce(&self) -> bool {
+        self.policy.read().map(|p| p.enforce).unwrap_or(false)
     }
 
     pub fn execute(&self, cmd: &Cmd) -> CommandResult {
@@ -77,6 +88,8 @@ impl Responder {
             "unfreeze" => self.freeze(cmd, false),
             "quarantine_file" => self.quarantine_file(cmd),
             "live_triage" => self.live_triage(),
+            "update_policy" => self.update_policy(cmd),
+            "self_update" => self.self_update(cmd),
             other => Err(format!("unknown command: {other}")),
         };
         let ok = res.is_ok();
@@ -298,9 +311,159 @@ impl Responder {
         Ok(summary)
     }
 
+    // -------- policy push (console → agent, hot-reloaded, persisted) --------
+    // Applies operator-tunable knobs without a restart and writes them to policy.json so
+    // they survive one. Unknown fields are ignored; out-of-range values are rejected per
+    // field rather than failing the whole push.
+    fn update_policy(&self, cmd: &Cmd) -> Result<String, String> {
+        let t = &cmd.target;
+        let mut changed: Vec<String> = Vec::new();
+        {
+            let mut p = self
+                .policy
+                .write()
+                .map_err(|_| "policy lock poisoned".to_string())?;
+            if let Some(v) = t.get("enforce").and_then(|v| v.as_bool()) {
+                p.enforce = v;
+                changed.push(format!("enforce={v}"));
+            }
+            if let Some(v) = t.get("dlp_enabled").and_then(|v| v.as_bool()) {
+                p.dlp_enabled = v;
+                changed.push(format!("dlp_enabled={v}"));
+            }
+            if let Some(v) = t.get("paused").and_then(|v| v.as_bool()) {
+                p.paused = v;
+                changed.push(format!("paused={v}"));
+            }
+            if let Some(v) = t.get("interval").and_then(|v| v.as_u64()) {
+                if (1..=3600).contains(&v) {
+                    p.interval_secs = v;
+                    changed.push(format!("interval={v}s"));
+                } else {
+                    return Err("interval must be 1..=3600".into());
+                }
+            }
+            if let Some(arr) = t.get("watch").and_then(|v| v.as_array()) {
+                // absolute paths only; reject a push that would leave FIM watching nothing.
+                let dirs: Vec<String> = arr
+                    .iter()
+                    .filter_map(|x| x.as_str())
+                    .filter(|s| s.starts_with('/') && !s.contains(".."))
+                    .map(|s| s.to_string())
+                    .collect();
+                if dirs.is_empty() {
+                    return Err("watch list must contain at least one absolute path".into());
+                }
+                p.watch = dirs.clone();
+                changed.push(format!("watch={} dirs", dirs.len()));
+            }
+            if changed.is_empty() {
+                return Err("no recognized policy fields in push".into());
+            }
+            // persist the snapshot while holding the lock so disk + memory stay consistent.
+            p.save(&self.policy_path).map_err(|e| e.to_string())?;
+        }
+        Ok(format!("policy updated: {}", changed.join(", ")))
+    }
+
+    // -------- agent self-update (verified binary swap + supervised restart) --------
+    // Downloads a new agent binary over HTTPS, verifies its sha256 against the value the
+    // server signed into the command, atomically replaces the running binary, and asks
+    // systemd to restart us into it. Gated behind `enforce` so a compromised channel can't
+    // silently swap the binary on a monitor-only fleet.
+    fn self_update(&self, cmd: &Cmd) -> Result<String, String> {
+        if !self.enforce() {
+            return Err("self-update disabled by policy (--enforce=false)".into());
+        }
+        let url = cmd
+            .target
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or("missing url")?;
+        let sha = cmd
+            .target
+            .get("sha256")
+            .and_then(|v| v.as_str())
+            .ok_or("missing sha256")?
+            .to_lowercase();
+        let version = cmd
+            .target
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        // HTTPS only (the binary is integrity-checked anyway, but no plaintext fetch) and a
+        // well-formed digest before we touch the network.
+        if !url.starts_with("https://") {
+            return Err("update url must be https".into());
+        }
+        if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("sha256 must be 64 hex chars".into());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            self.apply_self_update(url, &sha, version)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = version;
+            Err("self-update only supported on Linux".into())
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn apply_self_update(&self, url: &str, sha: &str, version: &str) -> Result<String, String> {
+        let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+        // stage in the same directory so the final rename is atomic (same filesystem).
+        let tmp = exe.with_extension("update");
+        // curl with structured argv — no shell, no interpolation into a command string.
+        let out = Command::new("curl")
+            .args(["-fsSL", "--proto", "=https", "--tlsv1.2", "-o"])
+            .arg(&tmp)
+            .arg(url)
+            .output()
+            .map_err(|e| format!("curl spawn: {e}"))?;
+        if !out.status.success() {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("download failed: {}", stderr(&out.stderr)));
+        }
+        let bytes = std::fs::read(&tmp).map_err(|e| format!("read staged binary: {e}"))?;
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        let got = h.finalize();
+        let got_hex: String = got.iter().map(|b| format!("{b:02x}")).collect();
+        if got_hex != sha {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!(
+                "sha256 mismatch: expected {sha}, got {got_hex} — aborting"
+            ));
+        }
+        // make it executable, then atomically swap over the running binary.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("chmod staged binary: {e}"))?;
+        std::fs::rename(&tmp, &exe).map_err(|e| format!("atomic replace: {e}"))?;
+        let size = bytes.len();
+        // restart on a short delay so this command's result flushes back over the WS first.
+        // systemd (Restart=always) brings us back up on the new binary.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let _ = Command::new("systemctl")
+                .args(["restart", "sentinel-agent"])
+                .status();
+        });
+        Ok(format!(
+            "update verified ({size} bytes{}), restarting in 2s",
+            if version.is_empty() {
+                String::new()
+            } else {
+                format!(", v{version}")
+            }
+        ))
+    }
+
     // -------- isolation (dedicated nft table) --------
     fn isolate(&self) -> Result<String, String> {
-        if !self.enforce {
+        if !self.enforce() {
             return Err("isolation disabled by policy (--enforce=false)".into());
         }
         #[cfg(target_os = "linux")]
@@ -361,7 +524,7 @@ impl Responder {
         if PROTECTED_USERS.contains(&user) {
             return Err(format!("refusing to disable protected account {user}"));
         }
-        if !self.enforce {
+        if !self.enforce() {
             return Err("account disable disabled by policy (--enforce=false)".into());
         }
         #[cfg(target_os = "linux")]
@@ -388,7 +551,7 @@ impl Responder {
 
     // -------- block uploads (dedicated nft egress table) --------
     fn block_upload(&self) -> Result<String, String> {
-        if !self.enforce {
+        if !self.enforce() {
             return Err("upload block disabled by policy (--enforce=false)".into());
         }
         #[cfg(target_os = "linux")]
@@ -414,7 +577,7 @@ impl Responder {
 
     // -------- block USB mass storage --------
     fn block_usb(&self) -> Result<String, String> {
-        if !self.enforce {
+        if !self.enforce() {
             return Err("usb block disabled by policy (--enforce=false)".into());
         }
         #[cfg(target_os = "linux")]
@@ -657,9 +820,19 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeMap;
 
+    fn test_policy() -> crate::config::SharedPolicy {
+        std::sync::Arc::new(std::sync::RwLock::new(crate::config::AgentPolicy {
+            enforce: true,
+            dlp_enabled: true,
+            paused: false,
+            interval_secs: 5,
+            watch: vec!["/etc".into()],
+        }))
+    }
     fn responder() -> Responder {
         Responder::new(
-            true,
+            test_policy(),
+            std::env::temp_dir().join("sentinel-test-policy.json"),
             "10.0.0.1".into(),
             Enforcement::new(),
             std::env::temp_dir().join("sentinel-test-audit.log"),
@@ -768,7 +941,8 @@ mod tests {
     fn enforcement_unsupported_off_linux_does_not_set_flag() {
         let enf = Enforcement::new();
         let r = Responder::new(
-            true,
+            test_policy(),
+            std::env::temp_dir().join("sentinel-test-policy2.json"),
             "10.0.0.1".into(),
             enf.clone(),
             std::env::temp_dir().join("a.log"),

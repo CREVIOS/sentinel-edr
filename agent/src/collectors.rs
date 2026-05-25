@@ -961,7 +961,7 @@ fn grade_posture(m: &HashMap<String, String>) -> (Vec<String>, &'static str) {
 // ---------------- file integrity monitoring ----------------
 
 pub struct FimCollector {
-    dirs: Vec<String>,
+    policy: crate::config::SharedPolicy,
     hashes: HashMap<String, String>,
     first: bool,
     max_files: usize,
@@ -969,9 +969,9 @@ pub struct FimCollector {
 }
 
 impl FimCollector {
-    pub fn new(dirs: Vec<String>) -> Self {
+    pub fn new(policy: crate::config::SharedPolicy) -> Self {
         FimCollector {
-            dirs,
+            policy,
             hashes: HashMap::new(),
             first: true,
             max_files: 4000,
@@ -983,7 +983,13 @@ impl FimCollector {
         let mut out = Vec::new();
         let mut current: HashMap<String, String> = HashMap::new();
         let mut count = 0;
-        for dir in &self.dirs {
+        // snapshot the live policy so a mid-poll console push doesn't tear the scan; watch
+        // dirs and the DLP toggle are both hot-reloadable.
+        let (dirs, dlp_on) = match self.policy.read() {
+            Ok(p) => (p.watch.clone(), p.dlp_enabled),
+            Err(_) => (Vec::new(), false),
+        };
+        for dir in &dirs {
             if !std::path::Path::new(dir).exists() {
                 continue;
             }
@@ -1026,7 +1032,7 @@ impl FimCollector {
                 // DLP content inspection runs on BOTH create and modify — a freshly-dropped
                 // file with secrets (exfil staging) must be caught, not only edits to existing
                 // files.
-                if size <= self.max_scan_bytes as u64 {
+                if dlp_on && size <= self.max_scan_bytes as u64 {
                     if let Ok(content) = std::fs::read_to_string(entry.path()) {
                         if let Some(dev) = dlp_event_for(&path, &content) {
                             out.push(dev);

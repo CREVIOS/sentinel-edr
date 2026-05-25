@@ -12,6 +12,8 @@ import { InfoSheet, type Field } from "@/components/info-sheet";
 import { Inspect } from "@/components/inspect";
 import { DataTable, SortHeader } from "@/components/data-table";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { PolicyPanel } from "@/components/policy-panel";
+import { Separator } from "@/components/ui/separator";
 import { useData, post } from "@/lib/use-data";
 import { ago } from "@/lib/format";
 import type { Agent } from "@/lib/types";
@@ -107,6 +109,12 @@ export default function EndpointsPage() {
             <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "block_usb", label: "Block USB", desc: `Block USB mass-storage on ${sel.hostname}.` })}><Usb className="size-4" /> Block USB</Button>
             <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "block_upload", label: "Block uploads", desc: `Block outbound uploads on ${sel.hostname}.` })}><CloudOff className="size-4" /> Block uploads</Button>
           </div>
+        )}
+        {sel && (
+          <>
+            <Separator className="my-4" />
+            <PolicyPanel agent={sel} />
+          </>
         )}
       </InfoSheet>
 

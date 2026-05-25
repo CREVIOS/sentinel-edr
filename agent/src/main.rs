@@ -72,6 +72,10 @@ async fn main() -> Result<()> {
     )?;
     let spool = Spool::open(spool_dir(&state_path), &state.spool_key)?;
 
+    // --- live policy (CLI defaults + persisted console push), shared with collectors ---
+    let policy = config::shared_policy(&cli, &state_path);
+    let policy_path = config::AgentPolicy::path(&state_path);
+
     // --- response channel ---
     let enforcement = Enforcement::new();
     let server_host = host_only(&cli.server);
@@ -79,7 +83,13 @@ async fn main() -> Result<()> {
         .parent()
         .map(|p| p.join("audit.log"))
         .unwrap_or_else(|| PathBuf::from("audit.log"));
-    let responder = Responder::new(cli.enforce, server_host, enforcement.clone(), audit_path);
+    let responder = Responder::new(
+        policy.clone(),
+        policy_path,
+        server_host,
+        enforcement.clone(),
+        audit_path,
+    );
     tokio::spawn(transport::command_channel(
         cli.server.clone(),
         state.agent_id.clone(),
@@ -100,11 +110,10 @@ async fn main() -> Result<()> {
     let dns = dnscache::DnsCache::new(tier != ebpf::Tier::Ebpf);
 
     // --- collectors ---
-    let watch = config::parse_csv(&cli.watch);
     let mut proc_c = collectors::ProcessCollector::new();
     let mut login_c = collectors::LoginCollector::new();
     let mut usb_c = collectors::UsbCollector::new();
-    let mut fim_c = collectors::FimCollector::new(watch);
+    let mut fim_c = collectors::FimCollector::new(policy.clone());
     let mut pkg_c = collectors::PackageCollector::new();
     let mut net_c = collectors::NetworkCollector::new(dns.clone());
     let mut authlog_c = collectors::AuthLogCollector::new();
@@ -120,7 +129,8 @@ async fn main() -> Result<()> {
     );
 
     let mut ticks: u64 = 0;
-    let mut interval = tokio::time::interval(Duration::from_secs(cli.interval.max(1)));
+    let mut cur_interval = policy.read().map(|p| p.interval_secs).unwrap_or(5).max(1);
+    let mut interval = tokio::time::interval(Duration::from_secs(cur_interval));
     let mut pkg_interval = 0u64;
 
     // graceful shutdown
@@ -132,6 +142,27 @@ async fn main() -> Result<()> {
             _ = &mut sig => { info!("shutdown signal received"); break; }
         }
         ticks += 1;
+
+        // hot-reload the cadence if a console push changed it.
+        let (paused, want_interval) = match policy.read() {
+            Ok(p) => (p.paused, p.interval_secs.max(1)),
+            Err(_) => (false, cur_interval),
+        };
+        if want_interval != cur_interval {
+            cur_interval = want_interval;
+            interval = tokio::time::interval(Duration::from_secs(cur_interval));
+            info!(
+                interval = cur_interval,
+                "collection interval updated by policy"
+            );
+        }
+
+        // paused by policy: skip telemetry but keep the heartbeat so the console still shows
+        // the endpoint online (and still receives commands like un-pause).
+        if paused {
+            flush_and_send(&sender, &spool, vec![heartbeat(ticks)]).await;
+            continue;
+        }
 
         let mut batch: Vec<event::Event> = Vec::new();
         batch.extend(proc_c.poll());

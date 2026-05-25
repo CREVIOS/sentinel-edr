@@ -136,6 +136,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/detections/{id}/status", s.auth.Require(auth.RoleAnalyst, s.setDetectionStatus))
 	mux.HandleFunc("POST /api/v1/respond", s.auth.Require(auth.RoleAnalyst, s.issueResponse))
 
+	// fleet management (admin): push collection policy + verified agent self-update.
+	mux.HandleFunc("POST /api/v1/agents/{id}/policy", s.auth.Require(auth.RoleAdmin, s.pushPolicy))
+	mux.HandleFunc("POST /api/v1/agents/{id}/upgrade", s.auth.Require(auth.RoleAdmin, s.upgradeAgent))
+
 	// console live feed (JWT via Sec-WebSocket-Protocol)
 	mux.HandleFunc("GET /ws", s.consoleWS)
 
@@ -538,6 +542,136 @@ func (s *Server) issueResponse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// policyReq is the console's policy-push payload. Omitted fields are left unchanged on the
+// agent; only the keys present here are forwarded in the command target.
+type policyReq struct {
+	Enforce    *bool     `json:"enforce,omitempty"`
+	DLPEnabled *bool     `json:"dlp_enabled,omitempty"`
+	Paused     *bool     `json:"paused,omitempty"`
+	Interval   *int      `json:"interval,omitempty"`
+	Watch      *[]string `json:"watch,omitempty"`
+	Reason     string    `json:"reason"`
+}
+
+// pushPolicy hot-reloads an agent's collection policy (watch dirs, DLP toggle, enforcement
+// gate, interval, pause) via an `update_policy` command. Admin-only: it changes what the
+// endpoint collects and whether it will enforce.
+func (s *Server) pushPolicy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.store.GetAgent(id); err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var req policyReq
+	if err := readJSON(r, &req, 1<<16); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	target := map[string]any{}
+	if req.Enforce != nil {
+		target["enforce"] = *req.Enforce
+	}
+	if req.DLPEnabled != nil {
+		target["dlp_enabled"] = *req.DLPEnabled
+	}
+	if req.Paused != nil {
+		target["paused"] = *req.Paused
+	}
+	if req.Interval != nil {
+		if *req.Interval < 1 || *req.Interval > 3600 {
+			http.Error(w, "interval must be 1..3600", http.StatusBadRequest)
+			return
+		}
+		target["interval"] = *req.Interval
+	}
+	if req.Watch != nil {
+		clean := make([]string, 0, len(*req.Watch))
+		for _, p := range *req.Watch {
+			if strings.HasPrefix(p, "/") && !strings.Contains(p, "..") {
+				clean = append(clean, p)
+			}
+		}
+		if len(clean) == 0 {
+			http.Error(w, "watch must contain at least one absolute path", http.StatusBadRequest)
+			return
+		}
+		target["watch"] = clean
+	}
+	if len(target) == 0 {
+		http.Error(w, "no policy fields provided", http.StatusBadRequest)
+		return
+	}
+	a := &model.ResponseAction{
+		Type: model.RespUpdatePolicy, AgentID: id, Target: target,
+		Reason: req.Reason, IssuedBy: auth.UserFromContext(r.Context()),
+	}
+	out, err := s.respond.Issue(a)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type upgradeReq struct {
+	Version string `json:"version"` // target version, e.g. "0.4.0"
+	URL     string `json:"url"`     // https URL of the new binary for this arch
+	SHA256  string `json:"sha256"`  // expected digest of the binary
+	Force   bool   `json:"force"`   // upgrade even if already at target version
+	Reason  string `json:"reason"`
+}
+
+// upgradeAgent issues a verified `self_update`. It no-ops (without dispatching) when the
+// agent already reports the target version, so the console can call it idempotently across
+// a fleet. Admin-only.
+func (s *Server) upgradeAgent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	ag, err := s.store.GetAgent(id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var req upgradeReq
+	if err := readJSON(r, &req, 1<<16); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(req.URL, "https://") {
+		http.Error(w, "url must be https", http.StatusBadRequest)
+		return
+	}
+	if len(req.SHA256) != 64 || !isHex(req.SHA256) {
+		http.Error(w, "sha256 must be 64 hex chars", http.StatusBadRequest)
+		return
+	}
+	if !req.Force && req.Version != "" && ag.Version == req.Version {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "up-to-date", "agent_id": id, "version": ag.Version,
+		})
+		return
+	}
+	a := &model.ResponseAction{
+		Type: model.RespSelfUpdate, AgentID: id,
+		Target: map[string]any{"url": req.URL, "sha256": strings.ToLower(req.SHA256), "version": req.Version},
+		Reason: req.Reason, IssuedBy: auth.UserFromContext(r.Context()),
+	}
+	out, err := s.respond.Issue(a)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // ---------- websockets ----------
 
 func (s *Server) consoleWS(w http.ResponseWriter, r *http.Request) {
@@ -676,7 +810,8 @@ func validResponseType(t string) bool {
 	switch model.ResponseType(t) {
 	case model.RespKillProcess, model.RespKillTree, model.RespIsolate, model.RespUnisolate,
 		model.RespDisableAccount, model.RespBlockUpload, model.RespBlockUSB,
-		model.RespFreeze, model.RespUnfreeze, model.RespQuarantine, model.RespLiveTriage:
+		model.RespFreeze, model.RespUnfreeze, model.RespQuarantine, model.RespLiveTriage,
+		model.RespUpdatePolicy, model.RespSelfUpdate:
 		return true
 	}
 	return false

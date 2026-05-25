@@ -212,6 +212,9 @@ const (
 	RespUnfreeze       ResponseType = "unfreeze"
 	RespQuarantine     ResponseType = "quarantine_file"
 	RespLiveTriage     ResponseType = "live_triage"
+	// Fleet-management commands (not containment): hot-reload policy + verified self-update.
+	RespUpdatePolicy ResponseType = "update_policy"
+	RespSelfUpdate   ResponseType = "self_update"
 )
 
 type ResponseStatus string

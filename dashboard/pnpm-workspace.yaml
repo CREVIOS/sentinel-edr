@@ -1,5 +1,8 @@
 packages:
   - "."
+overrides:
+  # force-patch postcss (transitive via next) → GHSA-qx2v-qp2m-jg93 (XSS in CSS stringify)
+  postcss: ">=8.5.10"
 allowBuilds:
   sharp: true
   "@tailwindcss/oxide": true

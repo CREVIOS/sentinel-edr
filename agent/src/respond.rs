@@ -174,7 +174,14 @@ impl Responder {
             return Err(format!("refusing to quarantine protected path: {path}"));
         }
         let src = std::path::Path::new(path);
-        if !src.is_file() {
+        // Use symlink_metadata (lstat) — a symlink at an allowed path could point at a
+        // protected target (e.g. /home/x -> /etc/shadow); following it would copy that
+        // target's bytes into the quarantine store. Refuse symlinks; require a real file.
+        let md = std::fs::symlink_metadata(src).map_err(|e| format!("stat: {e}"))?;
+        if md.file_type().is_symlink() {
+            return Err(format!("refusing to quarantine a symlink: {path}"));
+        }
+        if !md.is_file() {
             return Err(format!("not a regular file: {path}"));
         }
         let data = std::fs::read(src).map_err(|e| format!("read: {e}"))?;
@@ -644,6 +651,22 @@ mod tests {
         assert!(!valid_quarantine_path("relative/path"));
         assert!(valid_quarantine_path("/home/user/Downloads/malware.bin"));
         assert!(valid_quarantine_path("/tmp/dropper"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quarantine_refuses_symlink() {
+        let dir = std::env::temp_dir().join(format!("sentinel-qtest-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink("/etc/hostname", &link).unwrap();
+        let r = responder();
+        let res = r.execute(&cmd("quarantine_file", json!({ "path": link.to_str().unwrap() })));
+        assert!(!res.ok, "must refuse a symlink target");
+        assert!(res.message.contains("symlink"), "msg: {}", res.message);
+        // the symlink itself must still exist (we refused before touching it)
+        assert!(link.symlink_metadata().is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

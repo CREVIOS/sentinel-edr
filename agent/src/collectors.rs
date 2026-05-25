@@ -1429,7 +1429,11 @@ impl NetworkCollector {
 /// listening port) from the two port numbers. A well-known service port on one side marks the
 /// server; otherwise the numerically-lower port is the server side.
 fn classify_direction(local: &str, remote: &str) -> &'static str {
-    let port = |a: &str| remote_port(a).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    let port = |a: &str| {
+        remote_port(a)
+            .and_then(|p| p.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
     let (lp, rp) = (port(local), port(remote));
     let (lsvc, rsvc) = (is_service_port(lp), is_service_port(rp));
     if rsvc && !lsvc {
@@ -1683,19 +1687,37 @@ mod p0_tests {
     #[test]
     fn direction_from_ports() {
         // remote is a well-known service port, local ephemeral → we dialed out
-        assert_eq!(classify_direction("10.0.0.2:51234", "1.1.1.1:443"), "outbound");
+        assert_eq!(
+            classify_direction("10.0.0.2:51234", "1.1.1.1:443"),
+            "outbound"
+        );
         // local is our listening port, remote ephemeral → someone dialed in
-        assert_eq!(classify_direction("10.0.0.2:443", "203.0.113.9:51234"), "inbound");
-        assert_eq!(classify_direction("10.0.0.2:22", "203.0.113.9:60000"), "inbound");
+        assert_eq!(
+            classify_direction("10.0.0.2:443", "203.0.113.9:51234"),
+            "inbound"
+        );
+        assert_eq!(
+            classify_direction("10.0.0.2:22", "203.0.113.9:60000"),
+            "inbound"
+        );
         // ipv6 forms
-        assert_eq!(classify_direction("[2001:db8::2]:51000", "[2606:4700::1]:443"), "outbound");
+        assert_eq!(
+            classify_direction("[2001:db8::2]:51000", "[2606:4700::1]:443"),
+            "outbound"
+        );
         // postgres backend: client ephemeral → server 5432 (we are the client side here)
-        assert_eq!(classify_direction("172.23.0.4:44036", "172.23.0.5:5432"), "outbound");
+        assert_eq!(
+            classify_direction("172.23.0.4:44036", "172.23.0.5:5432"),
+            "outbound"
+        );
     }
 
     #[test]
     fn worker_relabel_detected() {
-        assert!(is_worker_relabel("postgres", "postgres: postgres comp 172.23.0.5(44122) idle"));
+        assert!(is_worker_relabel(
+            "postgres",
+            "postgres: postgres comp 172.23.0.5(44122) idle"
+        ));
         assert!(is_worker_relabel("nginx", "nginx: worker process"));
         // a real command must NOT be filtered
         assert!(!is_worker_relabel("bash", "bash -c whoami"));

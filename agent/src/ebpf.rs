@@ -188,7 +188,9 @@ pub mod loader {
             let mut buf = perf.open(cpu, None)?;
             let sink = sink.clone();
             tokio::spawn(async move {
-                let mut bufs = (0..16).map(|_| BytesMut::with_capacity(256)).collect::<Vec<_>>();
+                let mut bufs = (0..16)
+                    .map(|_| BytesMut::with_capacity(256))
+                    .collect::<Vec<_>>();
                 loop {
                     let events = match buf.read_events(&mut bufs).await {
                         Ok(e) => e,

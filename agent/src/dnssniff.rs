@@ -34,7 +34,10 @@ fn run(cache: DnsCache) -> anyhow::Result<()> {
     // Kernel-side BPF prefilter so we only wake for DNS, not every packet on a busy host.
     cap.filter("udp port 53", true)?;
     let link_off = link_header_len(cap.get_datalink());
-    info!(datalink = cap.get_datalink().0, "DNS sniffer active (forward-DNS attribution)");
+    info!(
+        datalink = cap.get_datalink().0,
+        "DNS sniffer active (forward-DNS attribution)"
+    );
 
     loop {
         match cap.next_packet() {

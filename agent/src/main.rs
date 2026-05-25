@@ -37,6 +37,12 @@ async fn main() -> Result<()> {
         )
         .init();
 
+    // rustls 0.23 refuses to pick a CryptoProvider when more than one is linked into the
+    // process (reqwest pulls aws-lc-rs, our direct rustls pulls ring), which otherwise panics
+    // the command-channel TLS task. Install ring as the deterministic process default before
+    // any TLS client is built. Idempotent; ignore the error if one is already installed.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let cli = Cli::parse();
     harden_self();
     let labels = config::parse_csv(&cli.labels);

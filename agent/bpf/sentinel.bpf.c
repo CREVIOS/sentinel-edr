@@ -21,6 +21,7 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
+#include <bpf/bpf_endian.h>
 
 char LICENSE[] SEC("license") = "GPL";
 
@@ -101,6 +102,56 @@ struct {
     __type(key, __u64);
     __type(value, __u8);
 } PROTECTED_INODES SEC(".maps");
+
+// No-miss outbound connection capture (polling /proc misses short-lived sockets). Emitted from
+// the connect() syscall tracepoint with the acting pid — userspace resolves the IP → domain.
+struct net_event {
+    __u32 pid;
+    __u32 uid;
+    __u16 family; // 2=AF_INET, 10=AF_INET6
+    __u16 dport;  // destination port (host order)
+    __u8 daddr[16];
+    __u8 comm[TASK_COMM_LEN];
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20);
+} NET_EVENTS SEC(".maps");
+
+#define AF_INET 2
+#define AF_INET6 10
+
+SEC("tracepoint/syscalls/sys_enter_connect")
+int handle_connect(struct trace_event_raw_sys_enter *ctx)
+{
+    __u8 *uaddr = (__u8 *)ctx->args[1]; // const struct sockaddr __user *
+    __u16 family = 0;
+    bpf_probe_read_user(&family, sizeof(family), uaddr);
+    if (family != AF_INET && family != AF_INET6)
+        return 0; // only IP sockets
+    struct net_event *e = bpf_ringbuf_reserve(&NET_EVENTS, sizeof(*e), 0);
+    if (!e)
+        return 0;
+    e->pid = bpf_get_current_pid_tgid() >> 32;
+    e->uid = (__u32)bpf_get_current_uid_gid();
+    e->family = family;
+    e->dport = 0;
+    __builtin_memset(e->daddr, 0, sizeof(e->daddr));
+    bpf_get_current_comm(&e->comm, sizeof(e->comm));
+    __u16 port = 0;
+    if (family == AF_INET) {
+        // struct sockaddr_in { u16 family; u16 port; u32 addr; }
+        bpf_probe_read_user(&port, sizeof(port), uaddr + 2);
+        bpf_probe_read_user(e->daddr, 4, uaddr + 4);
+    } else {
+        // struct sockaddr_in6 { u16 family; u16 port; u32 flowinfo; u8 addr[16]; }
+        bpf_probe_read_user(&port, sizeof(port), uaddr + 2);
+        bpf_probe_read_user(e->daddr, 16, uaddr + 8);
+    }
+    e->dport = bpf_ntohs(port);
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
 
 static __always_inline __u32 enforce_level(void)
 {

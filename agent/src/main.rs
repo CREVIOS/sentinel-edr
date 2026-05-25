@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
     let ebpf_sink: Option<bpf::Sink> = if tier == ebpf::Tier::Ebpf {
         // AllowInit: deny kill/ptrace of the agent from anyone except init(systemd) + the agent
         // itself, so the host stays manageable while a normal root shell cannot kill it.
-        match bpf::load_and_run(bpf::Enforce::AllowInit) {
+        match bpf::load_and_run(bpf::Enforce::AllowInit, dns.clone()) {
             Ok(s) => Some(s),
             Err(e) => {
                 warn!(error = %e, "eBPF load failed; continuing on the polling tier");

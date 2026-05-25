@@ -8,8 +8,10 @@
 //! telemetry). Enforcement is gated by the ENFORCE map so it can be armed live.
 #![cfg(all(feature = "ebpf", target_os = "linux"))]
 
-use crate::event::{Event, Process};
+use crate::dnscache::DnsCache;
+use crate::event::{Event, NetInfo, Process};
 use libbpf_rs::{MapCore, MapFlags, ObjectBuilder, RingBufferBuilder};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -38,6 +40,19 @@ struct TamperEvent {
     caller_comm: [u8; 16],
 }
 
+/// Mirror of `struct net_event` — emitted by the connect() tracepoint for every outbound IP
+/// socket, with the acting pid. No-miss: catches short-lived connections /proc polling misses.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NetEvent {
+    pid: u32,
+    uid: u32,
+    family: u16, // 2=AF_INET, 10=AF_INET6
+    dport: u16,  // host order
+    daddr: [u8; 16],
+    comm: [u8; 16],
+}
+
 pub type Sink = Arc<Mutex<Vec<Event>>>;
 
 /// LSM enforcement level (matches the ENFORCE map in the kernel program).
@@ -54,7 +69,7 @@ pub enum Enforce {
 /// Load the object, arm enforcement, protect self, attach programs, and start draining exec
 /// events. Returns the sink the agent loop folds into each batch. The Object is leaked so the
 /// programs + ring buffer stay live for the process lifetime.
-pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
+pub fn load_and_run(enforce: Enforce, dns: DnsCache) -> anyhow::Result<Sink> {
     let mut open = ObjectBuilder::default().open_file(OBJECT_PATH)?;
     // libbpf loads ALL programs at once; the LSM programs fail with -EINVAL unless `lsm=bpf` is
     // in the kernel's active LSM list. So when it isn't, disable autoload for everything except
@@ -65,7 +80,7 @@ pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
         .unwrap_or(false);
     if !lsm_active {
         for mut p in open.progs_mut() {
-            if p.name() != "handle_exec" {
+            if !is_tracepoint(&p.name().to_string_lossy()) {
                 let _ = p.set_autoload(false);
             }
         }
@@ -114,7 +129,7 @@ pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
     let mut attached = 0;
     for prog in obj.progs_mut() {
         let name = prog.name().to_string_lossy().into_owned();
-        if !lsm_active && name != "handle_exec" {
+        if !lsm_active && !is_tracepoint(&name) {
             continue; // LSM progs aren't loaded when lsm=bpf is off
         }
         match prog.attach() {
@@ -161,6 +176,25 @@ pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
             0
         })?;
     }
+    // drain outbound-connection events (no-miss) → network events on the same sink. Resolves the
+    // IP → domain via the DNS cache (filled by the libpcap sniffer + reverse lookups).
+    let net_map = obj.maps().find(|m| m.name() == "NET_EVENTS");
+    if let Some(nm) = &net_map {
+        let sink4 = sink.clone();
+        let dns = dns.clone();
+        let own_pid = std::process::id();
+        rbb.add(nm, move |data: &[u8]| {
+            if data.len() >= core::mem::size_of::<NetEvent>() {
+                let n = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const NetEvent) };
+                if let Some(ev) = to_net_event(&n, &dns, own_pid) {
+                    if let Ok(mut q) = sink4.lock() {
+                        q.push(ev);
+                    }
+                }
+            }
+            0
+        })?;
+    }
     let rb = rbb.build()?;
     std::thread::Builder::new()
         .name("bpf-ringbuf".into())
@@ -176,6 +210,12 @@ pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
         "eBPF (libbpf) telemetry + LSM tamper-protection loaded"
     );
     Ok(sink)
+}
+
+/// Tracepoint programs (not LSM) load + attach without `lsm=bpf`. These stay on in the
+/// telemetry-only tier; the LSM hooks light up only after a reboot with lsm=bpf.
+fn is_tracepoint(name: &str) -> bool {
+    matches!(name, "handle_exec" | "handle_connect")
 }
 
 fn parent_pid() -> u32 {
@@ -227,6 +267,59 @@ fn to_tamper_event(t: &TamperEvent) -> Event {
         ..Default::default()
     });
     ev
+}
+
+fn to_net_event(n: &NetEvent, dns: &DnsCache, own_pid: u32) -> Option<Event> {
+    // Skip the agent's own connections (heartbeat/batch upload to the server) — they'd be a
+    // self-referential feedback loop — and loopback noise.
+    if n.pid == own_pid {
+        return None;
+    }
+    let ip: IpAddr = if n.family == 2 {
+        IpAddr::V4(Ipv4Addr::new(n.daddr[0], n.daddr[1], n.daddr[2], n.daddr[3]))
+    } else {
+        let mut b = [0u8; 16];
+        b.copy_from_slice(&n.daddr);
+        IpAddr::V6(Ipv6Addr::from(b))
+    };
+    if ip.is_loopback() || ip.is_unspecified() {
+        return None;
+    }
+    let remote = format!("{}:{}", ip, n.dport);
+    let comm = cstr(&n.comm);
+    let domain = dns.lookup(ip).unwrap_or_default();
+    let category = if domain.is_empty() {
+        String::new()
+    } else {
+        crate::collectors::categorize_domain(&domain).to_string()
+    };
+    let dest = if domain.is_empty() {
+        remote.clone()
+    } else {
+        format!("{} [{}]", domain, remote)
+    };
+    let mut ev = Event::new("network", "connect", "info")
+        .with_user(&uid_name(n.uid))
+        .msg(format!(
+            "outbound tcp connection to {} by {} (pid {}, ebpf)",
+            dest, comm, n.pid
+        ));
+    ev.network = Some(NetInfo {
+        direction: "outbound".into(),
+        proto: "tcp".into(),
+        remote,
+        domain,
+        category,
+        ..Default::default()
+    });
+    ev.process = Some(Process {
+        pid: n.pid as i64,
+        name: comm,
+        uid: n.uid as i64,
+        user: uid_name(n.uid),
+        ..Default::default()
+    });
+    Some(ev)
 }
 
 fn cstr(b: &[u8]) -> String {

@@ -184,6 +184,9 @@ func (p *Processor) emit(d *model.Detection, ev *model.Event, action string) err
 			return nil
 		}
 	}
+	if d.RiskScore == 0 {
+		d.RiskScore = riskScore(d)
+	}
 	if err := p.store.InsertDetection(d); err != nil {
 		p.log.Error("persist detection", "err", err)
 		return err
@@ -204,6 +207,36 @@ func (p *Processor) emit(d *model.Detection, ev *model.Event, action string) err
 		}
 	}
 	return nil
+}
+
+// riskScore ranks a detection 0-100 for triage: severity sets the floor, the engine adds a
+// confidence bonus (an exact IOC hash hit is near-certain; a baseline anomaly is a softer
+// signal), and a tamper attempt is always top priority.
+func riskScore(d *model.Detection) int {
+	score := map[model.Severity]int{
+		model.SevInfo: 10, model.SevLow: 25, model.SevMedium: 50,
+		model.SevHigh: 75, model.SevCritical: 90,
+	}[d.Severity]
+	switch d.Engine {
+	case "ioc":
+		score += 15 // exact hash/ip/domain match — high confidence
+	case "behavior":
+		score += 10 // multi-event correlation
+	case "sigma":
+		score += 5
+	case "baseline":
+		score += 0 // anomaly: real but softer; severity already medium
+	}
+	if d.RuleID == "tamper-attempt" || d.Category == model.CatSystem && d.Severity == model.SevCritical {
+		score = 100 // someone is attacking the agent itself
+	}
+	if score > 100 {
+		score = 100
+	}
+	if score < 0 {
+		score = 0
+	}
+	return score
 }
 
 func dlpDetection(ev *model.Event, info *model.DLPInfo) *model.Detection {

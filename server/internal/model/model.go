@@ -194,8 +194,9 @@ type Detection struct {
 	Tactic     string          `json:"tactic,omitempty"`
 	Status     DetectionStatus `json:"status"`
 	EventIDs   []string        `json:"event_ids,omitempty"`
-	Engine     string          `json:"engine"` // sigma|behavior|dlp
+	Engine     string          `json:"engine"` // sigma|behavior|dlp|ioc|baseline
 	AssignedTo string          `json:"assigned_to,omitempty"`
+	RiskScore  int             `json:"risk_score,omitempty"` // 0-100 confidence/priority for triage ranking
 }
 
 // ResponseAction is an automated or analyst-issued containment action.

@@ -26,6 +26,7 @@ import (
 	"github.com/sentinel/server/internal/hub"
 	"github.com/sentinel/server/internal/intel"
 	"github.com/sentinel/server/internal/mesh"
+	"github.com/sentinel/server/internal/notify"
 	"github.com/sentinel/server/internal/pipeline"
 	"github.com/sentinel/server/internal/respond"
 	"github.com/sentinel/server/internal/store"
@@ -107,7 +108,12 @@ func main() {
 	if cfg.Correlate && cfg.RunsRole("correlator") {
 		behaviorEng = behavior.New()
 	}
-	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).WithIntel(intelEng)
+	var notifier *notify.Notifier
+	if cfg.AlertWebhook != "" {
+		notifier = notify.New(cfg.AlertWebhook, notify.Kind(cfg.AlertKind), cfg.AlertMinSev, log)
+		log.Info("alerting enabled", "kind", cfg.AlertKind, "min_severity", cfg.AlertMinSev)
+	}
+	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).WithIntel(intelEng).WithNotify(notifier)
 
 	if cfg.RunsRole("worker") {
 		if err := proc.StartProcessors(busB); err != nil {

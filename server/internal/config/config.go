@@ -28,6 +28,9 @@ type Config struct {
 	BehindProxy    bool   // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
 	RulesDir       string // directory of Sigma-style YAML rules
 	IOCDir         string // directory of threat-intel IOC feed files (hash/ip/domain)
+	AlertWebhook   string // webhook URL for detection alerts ("" disables)
+	AlertKind      string // slack | discord | generic
+	AlertMinSev    string // minimum severity to alert (default high)
 	WebDir         string // optional external dir for the built console (else embedded)
 	Correlate      bool   // worker also runs behavioral correlation
 	AllowOrigins   []string
@@ -53,6 +56,9 @@ func Load() *Config {
 		TLSClientCA:  env("SENTINEL_TLS_CLIENT_CA", ""),
 		RulesDir:     env("SENTINEL_RULES_DIR", "rules"),
 		IOCDir:       env("SENTINEL_IOC_DIR", "intel/feeds"),
+		AlertWebhook: env("SENTINEL_ALERT_WEBHOOK", ""),
+		AlertKind:    env("SENTINEL_ALERT_KIND", "generic"),
+		AlertMinSev:  env("SENTINEL_ALERT_MIN_SEVERITY", "high"),
 		WebDir:       env("SENTINEL_WEB_DIR", ""),
 		Correlate:    env("SENTINEL_CORRELATE", "true") != "false",
 		BehindProxy:  env("SENTINEL_BEHIND_PROXY", "") == "true",

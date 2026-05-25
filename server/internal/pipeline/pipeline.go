@@ -18,6 +18,7 @@ import (
 	"github.com/sentinel/server/internal/dlp"
 	"github.com/sentinel/server/internal/intel"
 	"github.com/sentinel/server/internal/model"
+	"github.com/sentinel/server/internal/notify"
 	"github.com/sentinel/server/internal/respond"
 	"github.com/sentinel/server/internal/store"
 	"github.com/sentinel/server/internal/transport"
@@ -32,6 +33,7 @@ type Processor struct {
 	respond  *respond.Orchestrator
 	bcast    transport.Broadcaster
 	intel    *intel.Engine
+	notify   *notify.Notifier
 	log      *slog.Logger
 }
 
@@ -42,6 +44,9 @@ func New(s store.Store, d *detect.Engine, dl *dlp.Engine, b *behavior.Engine, r 
 
 // WithIntel attaches a threat-intel (IOC) engine. Optional; nil → no IOC matching.
 func (p *Processor) WithIntel(e *intel.Engine) *Processor { p.intel = e; return p }
+
+// WithNotify attaches an alert notifier. Optional; nil → no external alerting.
+func (p *Processor) WithNotify(n *notify.Notifier) *Processor { p.notify = n; return p }
 
 // StartProcessors subscribes the stateless detection/DLP consumer (queue group).
 func (p *Processor) StartProcessors(b bus.Bus) error {
@@ -153,6 +158,7 @@ func (p *Processor) emit(d *model.Detection, ev *model.Event, action string) err
 		return err
 	}
 	p.bcast.Broadcast("detection", d)
+	p.notify.Notify(d) // external alert (severity-gated + throttled; no-op if nil)
 	if p.respond != nil && action != "" {
 		if r := p.respond.AutoFromDetection(d, ev, action); r != nil {
 			p.log.Info("auto-response", "type", r.Type, "agent", r.AgentID, "status", r.Status)

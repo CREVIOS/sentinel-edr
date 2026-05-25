@@ -11,29 +11,41 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "signal"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sysinfo = "0.32"
+sysinfo = "0.38"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 mac_address = "1.1"
 hostname = "0.4"
 aes-gcm = "0.10"
-rand = "0.8"
+rand = "0.9"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-dirs = "5"
+dirs = "6"
 regex = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 walkdir = "2"
 libc = "0.2"
+
+# eBPF userspace loader — only pulled in with `--features ebpf` (needs aya + a CO-RE/BTF
+# kernel). The default build ships the polling collectors with zero eBPF deps.
+aya = { version = "0.13", optional = true }
+aya-log = { version = "0.2", optional = true }
+bytes = { version = "1", optional = true }
+
+[features]
+default = []
+# Build the in-kernel eBPF telemetry path. Requires: nightly + bpf-linker to build the
+# kernel object (see sentinel-ebpf/), and a runtime kernel with BTF + CAP_BPF/CAP_SYS_ADMIN.
+ebpf = ["dep:aya", "dep:aya-log", "dep:bytes"]
 
 [profile.release]
 opt-level = 3

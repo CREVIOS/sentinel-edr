@@ -180,7 +180,11 @@ impl Responder {
         let data = std::fs::read(src).map_err(|e| format!("read: {e}"))?;
         let mut h = Sha256::new();
         h.update(&data);
-        let hash = format!("{:x}", h.finalize());
+        let digest = h.finalize();
+        let mut hash = String::with_capacity(64);
+        for x in digest.iter() {
+            hash.push_str(&format!("{:02x}", x));
+        }
         let qdir = std::path::Path::new("/var/lib/sentinel/quarantine");
         std::fs::create_dir_all(qdir).map_err(|e| format!("mkdir quarantine: {e}"))?;
         let dest = qdir.join(&hash);

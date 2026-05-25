@@ -125,7 +125,7 @@ impl Spool {
 pub fn random_key_hex() -> String {
     use rand::RngCore;
     let mut b = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut b);
+    rand::rng().fill_bytes(&mut b);
     hex_encode(&b)
 }
 

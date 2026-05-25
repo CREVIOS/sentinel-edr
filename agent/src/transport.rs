@@ -136,7 +136,8 @@ async fn serve_commands(
         let msg = msg?;
         match msg {
             Message::Text(txt) => {
-                let cmd: Command = match serde_json::from_str(&txt) {
+                // tungstenite 0.26: Text payload is Utf8Bytes; borrow as &str for serde.
+                let cmd: Command = match serde_json::from_str(txt.as_str()) {
                     Ok(c) => c,
                     Err(_) => continue,
                 };
@@ -148,7 +149,7 @@ async fn serve_commands(
                 // error — then reconnect. The server may time out and re-issue; containment
                 // actions are idempotent (re-isolate, re-kill of a dead pid, re-lock) so a
                 // replay is safe.
-                if let Err(e) = write.send(Message::Text(body)).await {
+                if let Err(e) = write.send(Message::Text(body.into())).await {
                     warn!(error = %e, kind = %cmd.kind,
                         "command applied but result delivery failed; reconnecting");
                     break;

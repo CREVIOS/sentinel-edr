@@ -11,11 +11,11 @@ use crate::event::{AuthInfo, DlpInfo, Event, FileInfo, NetInfo, Process, UsbInfo
 
 /// Produce one wave of events: a multi-stage intrusion plus benign noise.
 pub fn generate_wave() -> Vec<Event> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut out = Vec::new();
     let users = ["alice", "bob", "carol", "deploy"];
-    let user = users[rng.gen_range(0..users.len())];
-    let pid = rng.gen_range(2000..60000);
+    let user = users[rng.random_range(0..users.len())];
+    let pid = rng.random_range(2000..60000);
 
     // --- benign baseline noise ---
     for (name, cmd) in [
@@ -103,7 +103,7 @@ pub fn generate_wave() -> Vec<Event> {
     out.push(net_event(user, "exfilnode.onion", "outbound", 2048, 1024));
 
     // --- Credential access: brute force burst (behavioral) ---
-    let attacker_ip = format!("203.0.113.{}", rng.gen_range(2..250));
+    let attacker_ip = format!("203.0.113.{}", rng.random_range(2..250));
     for _ in 0..6 {
         out.push(failed_login("root", &attacker_ip));
     }
@@ -148,8 +148,8 @@ pub fn generate_wave() -> Vec<Event> {
             user,
             dom,
             "outbound",
-            rng.gen_range(1000..50000),
-            rng.gen_range(1000..900000),
+            rng.random_range(1000..50000),
+            rng.random_range(1000..900000),
         ));
     }
 

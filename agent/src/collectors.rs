@@ -78,7 +78,7 @@ impl ProcessCollector {
         self.sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
-            ProcessRefreshKind::new()
+            ProcessRefreshKind::nothing()
                 .with_cmd(UpdateKind::Always)
                 .with_exe(UpdateKind::Always)
                 .with_user(UpdateKind::Always),
@@ -86,7 +86,7 @@ impl ProcessCollector {
         // Refresh the uid->name table occasionally so new accounts resolve (cheap; not every poll).
         self.ticks = self.ticks.wrapping_add(1);
         if self.ticks % 30 == 0 {
-            self.users.refresh_list();
+            self.users.refresh();
         }
         let mut out = Vec::new();
         let mut current = HashSet::new();
@@ -1055,7 +1055,16 @@ fn hash_file(path: &std::path::Path) -> Option<String> {
     let data = std::fs::read(path).ok()?;
     let mut h = Sha256::new();
     h.update(&data);
-    Some(format!("{:x}", h.finalize()))
+    Some(hex_lower(&h.finalize()))
+}
+
+/// Lower-hex encode bytes (sha2 0.11's finalize() output no longer impls LowerHex directly).
+fn hex_lower(b: &[u8]) -> String {
+    let mut s = String::with_capacity(b.len() * 2);
+    for x in b {
+        s.push_str(&format!("{:02x}", x));
+    }
+    s
 }
 
 // ---------------- package ----------------

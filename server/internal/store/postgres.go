@@ -107,6 +107,22 @@ func (s *pgStore) migrate() error {
 		start_offset => INTERVAL '2 days', end_offset => INTERVAL '1 hour',
 		schedule_interval => INTERVAL '30 minutes', if_not_exists => TRUE)`)
 	_ = s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name='events_hourly')`).Scan(&s.caggs)
+
+	// Hierarchical daily rollup (a cagg ON the hourly cagg, TimescaleDB 2.9+). Powers long-range
+	// trend/reporting cheaply. Hierarchical caggs can't run concurrent refreshes, so this uses
+	// its own hourly schedule that doesn't overlap the 30-min hourly refresh window.
+	_, _ = s.db.Exec(`CREATE MATERIALIZED VIEW IF NOT EXISTS events_daily
+		WITH (timescaledb.continuous) AS
+		SELECT time_bucket('1 day', bucket) AS day, category, sum(n) AS n
+		FROM events_hourly GROUP BY day, category WITH NO DATA`)
+	_, _ = s.db.Exec(`SELECT add_continuous_aggregate_policy('events_daily',
+		start_offset => INTERVAL '30 days', end_offset => INTERVAL '1 day',
+		schedule_interval => INTERVAL '1 hour', if_not_exists => TRUE)`)
+
+	// Retention tiers: raw events 90d (set above) → hourly rollup 180d → daily rollup 730d.
+	// Old raw data ages out while increasingly-coarse summaries survive for historical analysis.
+	_, _ = s.db.Exec(`SELECT add_retention_policy('events_hourly', INTERVAL '180 days', if_not_exists => TRUE)`)
+	_, _ = s.db.Exec(`SELECT add_retention_policy('events_daily', INTERVAL '730 days', if_not_exists => TRUE)`)
 	return nil
 }
 

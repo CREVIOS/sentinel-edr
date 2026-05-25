@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	subjConsole  = "console"
+	subjConsole   = "console"
 	subjCmdPrefix = "cmd."
 	subjPresence  = "presence."
 )

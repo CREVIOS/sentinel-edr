@@ -511,8 +511,8 @@ impl MountCollector {
         }
         for old in self.seen.difference(&current) {
             let mp = old.split('\t').nth(1).unwrap_or("").to_string();
-            let mut ev =
-                Event::new("usb", "unmount", "info").msg(format!("removable media unmounted: {mp}"));
+            let mut ev = Event::new("usb", "unmount", "info")
+                .msg(format!("removable media unmounted: {mp}"));
             ev.usb = Some(UsbInfo {
                 action: "unmount".into(),
                 mount: mp,
@@ -679,7 +679,12 @@ pub struct RootkitCollector {
 
 impl RootkitCollector {
     pub fn new() -> Self {
-        RootkitCollector { seen_hidden: HashSet::new(), preload_sig: None, first: true, ticks: 0 }
+        RootkitCollector {
+            seen_hidden: HashSet::new(),
+            preload_sig: None,
+            first: true,
+            ticks: 0,
+        }
     }
 
     pub fn poll(&mut self) -> Vec<Event> {
@@ -716,8 +721,9 @@ impl RootkitCollector {
         if let Some(t) = kernel_tainted() {
             if t != 0 && self.first {
                 out.push(
-                    Event::new("system", "kernel_tainted", "medium")
-                        .msg(format!("kernel taint flags = {t} (out-of-tree/forced module loaded)")),
+                    Event::new("system", "kernel_tainted", "medium").msg(format!(
+                        "kernel taint flags = {t} (out-of-tree/forced module loaded)"
+                    )),
                 );
             }
         }
@@ -814,7 +820,10 @@ pub struct PostureCollector {
 
 impl PostureCollector {
     pub fn new() -> Self {
-        PostureCollector { reported: false, ticks: 0 }
+        PostureCollector {
+            reported: false,
+            ticks: 0,
+        }
     }
 
     pub fn poll(&mut self) -> Vec<Event> {
@@ -828,11 +837,19 @@ impl PostureCollector {
         if findings.is_empty() {
             return Vec::new();
         }
-        let mut ev = Event::new("system", "hardening_posture", sev)
-            .msg(format!("host hardening: {} weak setting(s) — {}", findings.len(), findings.join("; ")));
+        let mut ev = Event::new("system", "hardening_posture", sev).msg(format!(
+            "host hardening: {} weak setting(s) — {}",
+            findings.len(),
+            findings.join("; ")
+        ));
         ev.extra.insert(
             "weak".into(),
-            serde_json::Value::Array(findings.into_iter().map(serde_json::Value::String).collect()),
+            serde_json::Value::Array(
+                findings
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
         );
         vec![ev]
     }
@@ -843,12 +860,22 @@ fn read_posture() -> HashMap<String, String> {
     let mut m = HashMap::new();
     #[cfg(target_os = "linux")]
     {
-        let rd = |p: &str| std::fs::read_to_string(p).ok().map(|s| s.trim().to_string());
+        let rd = |p: &str| {
+            std::fs::read_to_string(p)
+                .ok()
+                .map(|s| s.trim().to_string())
+        };
         for (k, p) in [
             ("kptr_restrict", "/proc/sys/kernel/kptr_restrict"),
             ("dmesg_restrict", "/proc/sys/kernel/dmesg_restrict"),
-            ("kexec_load_disabled", "/proc/sys/kernel/kexec_load_disabled"),
-            ("unprivileged_bpf_disabled", "/proc/sys/kernel/unprivileged_bpf_disabled"),
+            (
+                "kexec_load_disabled",
+                "/proc/sys/kernel/kexec_load_disabled",
+            ),
+            (
+                "unprivileged_bpf_disabled",
+                "/proc/sys/kernel/unprivileged_bpf_disabled",
+            ),
             ("ptrace_scope", "/proc/sys/kernel/yama/ptrace_scope"),
             ("rp_filter", "/proc/sys/net/ipv4/conf/all/rp_filter"),
         ] {
@@ -861,11 +888,19 @@ fn read_posture() -> HashMap<String, String> {
         }
         m.insert(
             "ima".into(),
-            if std::path::Path::new("/sys/kernel/security/ima").exists() { "present".into() } else { "absent".into() },
+            if std::path::Path::new("/sys/kernel/security/ima").exists() {
+                "present".into()
+            } else {
+                "absent".into()
+            },
         );
         m.insert(
             "secureboot".into(),
-            if std::path::Path::new("/sys/firmware/efi").exists() { "efi".into() } else { "legacy".into() },
+            if std::path::Path::new("/sys/firmware/efi").exists() {
+                "efi".into()
+            } else {
+                "legacy".into()
+            },
         );
     }
     m
@@ -881,21 +916,39 @@ fn grade_posture(m: &HashMap<String, String>) -> (Vec<String>, &'static str) {
             }
         }
     };
-    want_ge1("kptr_restrict", "kptr_restrict=0 (kernel pointers exposed)", &mut weak);
-    want_ge1("dmesg_restrict", "dmesg_restrict=0 (dmesg world-readable)", &mut weak);
+    want_ge1(
+        "kptr_restrict",
+        "kptr_restrict=0 (kernel pointers exposed)",
+        &mut weak,
+    );
+    want_ge1(
+        "dmesg_restrict",
+        "dmesg_restrict=0 (dmesg world-readable)",
+        &mut weak,
+    );
     want_ge1("kexec_load_disabled", "kexec_load not disabled", &mut weak);
-    want_ge1("unprivileged_bpf_disabled", "unprivileged_bpf enabled", &mut weak);
+    want_ge1(
+        "unprivileged_bpf_disabled",
+        "unprivileged_bpf enabled",
+        &mut weak,
+    );
     if m.get("ptrace_scope").map(|v| v == "0").unwrap_or(false) {
         weak.push("yama ptrace_scope=0 (any process can ptrace)".into());
     }
-    if m.get("lockdown").map(|v| v.contains("[none]")).unwrap_or(false) {
+    if m.get("lockdown")
+        .map(|v| v.contains("[none]"))
+        .unwrap_or(false)
+    {
         weak.push("kernel lockdown=none".into());
     }
     if m.get("ima").map(|v| v == "absent").unwrap_or(false) {
         weak.push("IMA not enabled (no runtime integrity measurement)".into());
     }
     // severity: any of the critical-ish → high, else medium
-    let sev = if weak.iter().any(|w| w.contains("bpf") || w.contains("lockdown") || w.contains("kexec")) {
+    let sev = if weak
+        .iter()
+        .any(|w| w.contains("bpf") || w.contains("lockdown") || w.contains("kexec"))
+    {
         "high"
     } else if weak.is_empty() {
         "info"
@@ -1277,12 +1330,20 @@ impl NetworkCollector {
                 let domain = remote_ip(&conn.remote)
                     .and_then(|ip| self.dns.lookup(ip))
                     .unwrap_or_default();
-                let dest = if domain.is_empty() { conn.remote.clone() } else { format!("{} [{}]", domain, conn.remote) };
+                let dest = if domain.is_empty() {
+                    conn.remote.clone()
+                } else {
+                    format!("{} [{}]", domain, conn.remote)
+                };
                 let mut ev = Event::new("network", "connect", "info").msg(format!(
                     "outbound {} connection to {}{}",
                     conn.proto, dest, who
                 ));
-                let category = if domain.is_empty() { conn.category() } else { categorize_domain(&domain).to_string() };
+                let category = if domain.is_empty() {
+                    conn.category()
+                } else {
+                    categorize_domain(&domain).to_string()
+                };
                 ev.network = Some(NetInfo {
                     direction: "outbound".into(),
                     proto: conn.proto.clone(),
@@ -1345,7 +1406,9 @@ fn parse_ss_process(field: &str) -> (i64, String) {
     let pid = field
         .split_once("pid=")
         .and_then(|(_, rest)| {
-            let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            let end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
             rest[..end].parse::<i64>().ok()
         })
         .unwrap_or(0);
@@ -1357,7 +1420,9 @@ fn parse_ss_bytes(info: &str) -> (i64, i64) {
     let field = |k: &str| -> i64 {
         info.split_once(k)
             .and_then(|(_, rest)| {
-                let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                let end = rest
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(rest.len());
                 rest[..end].parse::<i64>().ok()
             })
             .unwrap_or(0)
@@ -1534,7 +1599,8 @@ mod p0_tests {
     #[test]
     fn cgroup_kubepods_and_bare() {
         let id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-        let kube = format!("0::/kubepods.slice/kubepods-burstable-pod.../cri-containerd-{id}.scope");
+        let kube =
+            format!("0::/kubepods.slice/kubepods-burstable-pod.../cri-containerd-{id}.scope");
         assert!(parse_container_from_cgroup(&kube).ends_with(&id[..12]));
         // host process (no container id) → empty
         assert_eq!(parse_container_from_cgroup("0::/init.scope"), "");
@@ -1619,7 +1685,10 @@ tmpfs /mnt/should_skip tmpfs rw 0 0
         assert!(longest_hex_run("/system.slice/init.scope").is_none()); // no long hex
         assert!(longest_hex_run("docker").is_none()); // short
         let id = "abcdef0123456789abcdef0123456789abcd"; // 36 hex
-        assert_eq!(longest_hex_run(&format!("x-{id}.scope")).as_deref(), Some(id));
+        assert_eq!(
+            longest_hex_run(&format!("x-{id}.scope")).as_deref(),
+            Some(id)
+        );
     }
 
     #[test]
@@ -1633,7 +1702,7 @@ tmpfs /mnt/should_skip tmpfs rw 0 0
         assert!(weak.iter().any(|w| w.contains("bpf")));
         assert!(weak.iter().any(|w| w.contains("IMA")));
         assert_eq!(sev, "high"); // bpf weak → high
-        // hardened host → no findings, info
+                                 // hardened host → no findings, info
         let mut good = std::collections::HashMap::new();
         good.insert("kptr_restrict".into(), "2".into());
         good.insert("unprivileged_bpf_disabled".into(), "1".into());
@@ -1646,8 +1715,17 @@ tmpfs /mnt/should_skip tmpfs rw 0 0
     #[test]
     fn cgroup_podman_crio_and_none() {
         let id = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-        assert!(parse_container_from_cgroup(&format!("0::/machine.slice/libpod-{id}.scope")).starts_with("podman:"));
-        assert!(parse_container_from_cgroup(&format!("0::/system.slice/crio-{id}.scope")).starts_with("crio:"));
-        assert_eq!(parse_container_from_cgroup("0::/user.slice/user-1000.slice"), "");
+        assert!(
+            parse_container_from_cgroup(&format!("0::/machine.slice/libpod-{id}.scope"))
+                .starts_with("podman:")
+        );
+        assert!(
+            parse_container_from_cgroup(&format!("0::/system.slice/crio-{id}.scope"))
+                .starts_with("crio:")
+        );
+        assert_eq!(
+            parse_container_from_cgroup("0::/user.slice/user-1000.slice"),
+            ""
+        );
     }
 }

@@ -31,12 +31,12 @@ func sevToCEF(s model.Severity) int {
 // EventCEF renders one event as a CEF line.
 func EventCEF(e model.Event) string {
 	ext := map[string]string{
-		"rt":    fmt.Sprintf("%d", e.TS.UnixMilli()),
-		"dvchost": e.Hostname,
-		"suser": e.User,
-		"cs1":   string(e.Category),
+		"rt":       fmt.Sprintf("%d", e.TS.UnixMilli()),
+		"dvchost":  e.Hostname,
+		"suser":    e.User,
+		"cs1":      string(e.Category),
 		"cs1Label": "category",
-		"msg":   e.Message,
+		"msg":      e.Message,
 	}
 	if e.Process != nil {
 		ext["dproc"] = e.Process.Name
@@ -123,13 +123,13 @@ func stripCtrl(s string) string {
 // EventECS renders one event as an ECS JSON document.
 func EventECS(e model.Event) string {
 	doc := map[string]any{
-		"@timestamp":    e.TS.UTC().Format(time.RFC3339Nano),
-		"ecs":           map[string]any{"version": "9.3.0"},
-		"event":         map[string]any{"category": string(e.Category), "action": e.Action, "severity": sevToCEF(e.Severity)},
-		"host":          map[string]any{"name": e.Hostname, "id": e.AgentID},
-		"user":          map[string]any{"name": e.User},
-		"message":       e.Message,
-		"observer":      map[string]any{"vendor": "Sentinel", "product": "EDR-DLP"},
+		"@timestamp": e.TS.UTC().Format(time.RFC3339Nano),
+		"ecs":        map[string]any{"version": "9.3.0"},
+		"event":      map[string]any{"category": string(e.Category), "action": e.Action, "severity": sevToCEF(e.Severity)},
+		"host":       map[string]any{"name": e.Hostname, "id": e.AgentID},
+		"user":       map[string]any{"name": e.User},
+		"message":    e.Message,
+		"observer":   map[string]any{"vendor": "Sentinel", "product": "EDR-DLP"},
 	}
 	if e.Process != nil {
 		doc["process"] = map[string]any{"pid": e.Process.PID, "name": e.Process.Name, "command_line": e.Process.Cmdline, "parent": map[string]any{"name": e.Process.Parent}}

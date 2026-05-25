@@ -156,6 +156,9 @@ mod tests {
         // On the test host (no BPF priv / non-linux) this must resolve to a valid lower tier,
         // never panic.
         let t = detect_tier();
-        assert!(matches!(t, Tier::Ebpf | Tier::Auditd | Tier::Netlink | Tier::Polling));
+        assert!(matches!(
+            t,
+            Tier::Ebpf | Tier::Auditd | Tier::Netlink | Tier::Polling
+        ));
     }
 }

@@ -145,13 +145,23 @@ mod redact_tests {
             "ssn sample not fully masked: {}",
             ssn.sample
         );
-        assert!(!ssn.sample.contains('6'), "ssn digit leaked: {}", ssn.sample);
+        assert!(
+            !ssn.sample.contains('6'),
+            "ssn digit leaked: {}",
+            ssn.sample
+        );
     }
 
     // Non-PII classifiers keep the first-2/last-2 hint.
     #[test]
     fn secrets_keep_partial_hint() {
-        assert_eq!(redact("AKIAIOSFODNN7EXAMPLE", false).chars().filter(|&c| c == '*').count(), 16);
+        assert_eq!(
+            redact("AKIAIOSFODNN7EXAMPLE", false)
+                .chars()
+                .filter(|&c| c == '*')
+                .count(),
+            16
+        );
     }
 
     #[test]
@@ -165,9 +175,13 @@ mod redact_tests {
     #[test]
     fn luhn_gates_card_matches() {
         // valid Luhn test PAN → flagged
-        assert!(scan("pay 4111111111111111").iter().any(|f| f.classifier == "pci_card"));
+        assert!(scan("pay 4111111111111111")
+            .iter()
+            .any(|f| f.classifier == "pci_card"));
         // same digits, broken checksum → NOT flagged
-        assert!(!scan("pay 4111111111111112").iter().any(|f| f.classifier == "pci_card"));
+        assert!(!scan("pay 4111111111111112")
+            .iter()
+            .any(|f| f.classifier == "pci_card"));
     }
 
     #[test]

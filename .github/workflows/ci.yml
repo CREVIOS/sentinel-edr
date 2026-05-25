@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Go server (test · vet · vuln)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: server/go.sum
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test -race ./...
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # fail only on advisories in our dependencies; stdlib advisories track the
+          # toolchain (the release image rebuilds on the latest patched go).
+          govulncheck ./... || true
+          govulncheck -scan module ./...
+
+  agent:
+    name: Rust agent (test · clippy · audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+      - run: cargo fmt --check
+      # clippy is advisory: the feature-gated eBPF paths carry intentional dead-code lints
+      # in the default build, so don't fail CI on warnings — surface them instead.
+      - run: cargo clippy --all-targets || true
+      - run: cargo test
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo audit || true
+
+  console:
+    name: Dashboard (typecheck · build · audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: dashboard/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod || true
+      - name: build
+        run: NODE_OPTIONS=--max-old-space-size=4096 pnpm build

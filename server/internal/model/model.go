@@ -49,11 +49,11 @@ const (
 
 // Process describes the process associated with an event.
 type Process struct {
-	PID     int    `json:"pid,omitempty"`
-	PPID    int    `json:"ppid,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Exe     string `json:"exe,omitempty"`
-	Cmdline string `json:"cmdline,omitempty"`
+	PID       int    `json:"pid,omitempty"`
+	PPID      int    `json:"ppid,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Exe       string `json:"exe,omitempty"`
+	Cmdline   string `json:"cmdline,omitempty"`
 	UID       int    `json:"uid,omitempty"`
 	User      string `json:"user,omitempty"`
 	Parent    string `json:"parent,omitempty"`    // immediate parent process name
@@ -172,8 +172,8 @@ type Agent struct {
 type DetectionStatus string
 
 const (
-	DetOpen DetectionStatus = "open"
-	DetAck  DetectionStatus = "acknowledged"
+	DetOpen   DetectionStatus = "open"
+	DetAck    DetectionStatus = "acknowledged"
 	DetClosed DetectionStatus = "closed"
 )
 

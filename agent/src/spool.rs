@@ -187,7 +187,11 @@ mod tests {
     use crate::event::Event;
 
     fn tmpdir(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("sentinel-spool-test-{}-{}", tag, uuid::Uuid::new_v4()));
+        let d = std::env::temp_dir().join(format!(
+            "sentinel-spool-test-{}-{}",
+            tag,
+            uuid::Uuid::new_v4()
+        ));
         let _ = std::fs::remove_dir_all(&d);
         d
     }
@@ -218,7 +222,8 @@ mod tests {
     fn wrong_key_quarantines_not_returns() {
         let dir = tmpdir("key");
         let s1 = Spool::open(dir.clone(), &random_key_hex()).unwrap();
-        s1.store(&vec![Event::new("process", "exec", "info").msg("secret")]).unwrap();
+        s1.store(&vec![Event::new("process", "exec", "info").msg("secret")])
+            .unwrap();
         // Opened with a different key (e.g. state-file lost / key rotated): the undecryptable
         // file must NOT be returned, must NOT error forever — it is quarantined and drained.
         let s2 = Spool::open(dir.clone(), &random_key_hex()).unwrap();
@@ -232,7 +237,8 @@ mod tests {
         let dir = tmpdir("poison");
         let s = Spool::open(dir.clone(), &random_key_hex()).unwrap();
         // a valid batch (gets a current-time-ordered name)
-        s.store(&vec![Event::new("process", "exec", "info").msg("good")]).unwrap();
+        s.store(&vec![Event::new("process", "exec", "info").msg("good")])
+            .unwrap();
         // a poison file that sorts FIRST (older timestamp) and is >=12 bytes but undecryptable
         std::fs::write(dir.join("0000000000000000001-poison.spool"), vec![7u8; 64]).unwrap();
         // take_oldest must skip the poison (head of FIFO) and still return the good batch

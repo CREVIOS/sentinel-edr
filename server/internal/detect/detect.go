@@ -20,19 +20,19 @@ import (
 
 // Rule is a simplified Sigma rule.
 type Rule struct {
-	ID            string                       `yaml:"id"`
-	Title         string                       `yaml:"title"`
-	Status        string                       `yaml:"status"`
-	Description   string                       `yaml:"description"`
-	Severity      model.Severity               `yaml:"severity"`
-	Category      model.Category               `yaml:"category"`
-	MITRE         []string                     `yaml:"mitre"`
-	Tactic        string                       `yaml:"tactic"`
-	FalsePositive []string                     `yaml:"falsepositives"`
-	AutoRespond   string                       `yaml:"auto_respond"` // kill_process|isolate|block_upload|disable_account
-	Detection     map[string]map[string]any    `yaml:"-"`            // selections, filled from raw
-	Condition     string                       `yaml:"-"`
-	raw           map[string]any               // raw detection block
+	ID            string                    `yaml:"id"`
+	Title         string                    `yaml:"title"`
+	Status        string                    `yaml:"status"`
+	Description   string                    `yaml:"description"`
+	Severity      model.Severity            `yaml:"severity"`
+	Category      model.Category            `yaml:"category"`
+	MITRE         []string                  `yaml:"mitre"`
+	Tactic        string                    `yaml:"tactic"`
+	FalsePositive []string                  `yaml:"falsepositives"`
+	AutoRespond   string                    `yaml:"auto_respond"` // kill_process|isolate|block_upload|disable_account
+	Detection     map[string]map[string]any `yaml:"-"`            // selections, filled from raw
+	Condition     string                    `yaml:"-"`
+	raw           map[string]any            // raw detection block
 
 	// compiled selection -> field -> matcher
 	compiled map[string][]matcher

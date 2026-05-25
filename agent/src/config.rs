@@ -227,7 +227,10 @@ mod tests {
 
     #[test]
     fn parse_csv_trims_and_drops_empties() {
-        assert_eq!(parse_csv("/etc, /home ,, /root"), vec!["/etc", "/home", "/root"]);
+        assert_eq!(
+            parse_csv("/etc, /home ,, /root"),
+            vec!["/etc", "/home", "/root"]
+        );
         assert_eq!(parse_csv(""), Vec::<String>::new());
         assert_eq!(parse_csv("  "), Vec::<String>::new());
         assert_eq!(parse_csv("solo"), vec!["solo"]);

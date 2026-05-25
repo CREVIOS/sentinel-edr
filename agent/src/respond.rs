@@ -113,7 +113,11 @@ impl Responder {
 
     // -------- whole-process-tree kill (cgroup.kill, else recursive SIGKILL) --------
     fn kill_tree(&self, cmd: &Cmd) -> Result<String, String> {
-        let pid = cmd.target.get("pid").and_then(|v| v.as_i64()).ok_or("missing pid")? as i32;
+        let pid = cmd
+            .target
+            .get("pid")
+            .and_then(|v| v.as_i64())
+            .ok_or("missing pid")? as i32;
         if pid <= 1 {
             return Err("refusing to kill pid <= 1".into());
         }
@@ -123,7 +127,9 @@ impl Responder {
             if let Some(dir) = cgroup_dir(pid) {
                 let kf = std::path::Path::new(&dir).join("cgroup.kill");
                 if kf.exists() && std::fs::write(&kf, "1").is_ok() {
-                    return Ok(format!("process tree of {pid} killed via cgroup.kill ({dir})"));
+                    return Ok(format!(
+                        "process tree of {pid} killed via cgroup.kill ({dir})"
+                    ));
                 }
             }
             // Fallback: recursively SIGKILL pid + descendants (collected before killing).
@@ -136,7 +142,10 @@ impl Responder {
                     killed += 1;
                 }
             }
-            Ok(format!("process tree of {pid} killed ({killed}/{} pids, recursive SIGKILL)", victims.len()))
+            Ok(format!(
+                "process tree of {pid} killed ({killed}/{} pids, recursive SIGKILL)",
+                victims.len()
+            ))
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -146,7 +155,11 @@ impl Responder {
 
     // -------- cgroup freeze / thaw (forensic hold without killing) --------
     fn freeze(&self, cmd: &Cmd, freeze: bool) -> Result<String, String> {
-        let pid = cmd.target.get("pid").and_then(|v| v.as_i64()).ok_or("missing pid")? as i32;
+        let pid = cmd
+            .target
+            .get("pid")
+            .and_then(|v| v.as_i64())
+            .ok_or("missing pid")? as i32;
         if pid <= 1 {
             return Err("refusing to freeze pid <= 1".into());
         }
@@ -157,8 +170,16 @@ impl Responder {
             if !f.exists() {
                 return Err("cgroup.freeze unavailable (needs cgroup v2)".into());
             }
-            std::fs::write(&f, if freeze { "1" } else { "0" }).map_err(|e| format!("write cgroup.freeze: {e}"))?;
-            Ok(format!("process tree of {pid} {} ({dir})", if freeze { "frozen for forensics" } else { "thawed" }))
+            std::fs::write(&f, if freeze { "1" } else { "0" })
+                .map_err(|e| format!("write cgroup.freeze: {e}"))?;
+            Ok(format!(
+                "process tree of {pid} {} ({dir})",
+                if freeze {
+                    "frozen for forensics"
+                } else {
+                    "thawed"
+                }
+            ))
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -169,7 +190,11 @@ impl Responder {
 
     // -------- quarantine a file (copy → 0000, hash, record for restore) --------
     fn quarantine_file(&self, cmd: &Cmd) -> Result<String, String> {
-        let path = cmd.target.get("path").and_then(|v| v.as_str()).ok_or("missing path")?;
+        let path = cmd
+            .target
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or("missing path")?;
         if !valid_quarantine_path(path) {
             return Err(format!("refusing to quarantine protected path: {path}"));
         }
@@ -205,7 +230,10 @@ impl Responder {
         #[cfg(not(unix))]
         let mode = 0u32;
         let meta = serde_json::json!({ "original": path, "sha256": hash, "mode": mode, "ts": Utc::now().to_rfc3339() });
-        let _ = write_private(&qdir.join(format!("{hash}.json")), meta.to_string().as_bytes());
+        let _ = write_private(
+            &qdir.join(format!("{hash}.json")),
+            meta.to_string().as_bytes(),
+        );
         // neutralize the original: chmod 000 then remove (copy is safe in quarantine)
         #[cfg(unix)]
         {
@@ -213,23 +241,53 @@ impl Responder {
             let _ = std::fs::set_permissions(src, std::fs::Permissions::from_mode(0o000));
         }
         std::fs::remove_file(src).map_err(|e| format!("remove original: {e}"))?;
-        Ok(format!("quarantined {path} (sha256 {}…) → /var/lib/sentinel/quarantine", &hash[..16]))
+        Ok(format!(
+            "quarantined {path} (sha256 {}…) → /var/lib/sentinel/quarantine",
+            &hash[..16]
+        ))
     }
 
     // -------- on-demand live triage snapshot --------
     fn live_triage(&self) -> Result<String, String> {
-        let procs = Command::new("ps").args(["-eo", "pid,ppid,user,comm,args", "--sort=-%cpu"]).output().ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().take(40).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+        let procs = Command::new("ps")
+            .args(["-eo", "pid,ppid,user,comm,args", "--sort=-%cpu"])
+            .output()
+            .ok()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .take(40)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
         #[cfg(target_os = "linux")]
-        let socks = Command::new("ss").args(["-tunp"]).output().ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().take(60).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+        let socks = Command::new("ss")
+            .args(["-tunp"])
+            .output()
+            .ok()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .take(60)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
         #[cfg(not(target_os = "linux"))]
         let socks = String::new();
-        let modules = std::fs::read_to_string("/proc/modules").unwrap_or_default()
-            .lines().filter_map(|l| l.split_whitespace().next()).take(80).collect::<Vec<_>>().join(",");
+        let modules = std::fs::read_to_string("/proc/modules")
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.split_whitespace().next())
+            .take(80)
+            .collect::<Vec<_>>()
+            .join(",");
         let summary = format!(
             "triage: {} procs sampled, {} socket rows, {} modules",
-            procs.lines().count(), socks.lines().count(), modules.split(',').filter(|s| !s.is_empty()).count()
+            procs.lines().count(),
+            socks.lines().count(),
+            modules.split(',').filter(|s| !s.is_empty()).count()
         );
         // write the full snapshot to the audit dir for retrieval; return a summary inline.
         let dir = std::path::Path::new("/var/lib/sentinel/triage");
@@ -275,8 +333,8 @@ impl Responder {
         {
             // delete only OUR table; never touch the host's global ruleset
             let _ = nft(&["delete", "table", "inet", "sentinel"]); // ok if already absent
-            // Only clear the flag once the table is verifiably gone — otherwise telemetry
-            // would claim the host is un-isolated while traffic is still blocked.
+                                                                   // Only clear the flag once the table is verifiably gone — otherwise telemetry
+                                                                   // would claim the host is un-isolated while traffic is still blocked.
             if verify_nft_table("sentinel").is_ok() {
                 return Err("failed to remove isolation table (still present)".into());
             }
@@ -554,7 +612,9 @@ fn valid_quarantine_path(path: &str) -> bool {
     if !path.starts_with('/') || path.contains("..") {
         return false;
     }
-    const PROTECTED: [&str; 8] = ["/bin/", "/sbin/", "/usr/", "/lib/", "/lib64/", "/etc/", "/boot/", "/proc/"];
+    const PROTECTED: [&str; 8] = [
+        "/bin/", "/sbin/", "/usr/", "/lib/", "/lib64/", "/etc/", "/boot/", "/proc/",
+    ];
     !PROTECTED.iter().any(|p| path.starts_with(p))
 }
 
@@ -562,7 +622,12 @@ fn valid_quarantine_path(path: &str) -> bool {
 #[cfg(unix)]
 fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
-    let mut f = OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(path)?;
+    let mut f = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
     f.write_all(data)
 }
 #[cfg(not(unix))]
@@ -593,12 +658,23 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn responder() -> Responder {
-        Responder::new(true, "10.0.0.1".into(), Enforcement::new(), std::env::temp_dir().join("sentinel-test-audit.log"))
+        Responder::new(
+            true,
+            "10.0.0.1".into(),
+            Enforcement::new(),
+            std::env::temp_dir().join("sentinel-test-audit.log"),
+        )
     }
     fn cmd(kind: &str, target: serde_json::Value) -> Cmd {
-        let m: BTreeMap<String, serde_json::Value> =
-            target.as_object().map(|o| o.clone().into_iter().collect()).unwrap_or_default();
-        Cmd { id: "t".into(), kind: kind.into(), target: m }
+        let m: BTreeMap<String, serde_json::Value> = target
+            .as_object()
+            .map(|o| o.clone().into_iter().collect())
+            .unwrap_or_default();
+        Cmd {
+            id: "t".into(),
+            kind: kind.into(),
+            target: m,
+        }
     }
 
     #[test]
@@ -607,10 +683,10 @@ mod tests {
         assert!(valid_username("app_1"));
         assert!(valid_username("_svc"));
         assert!(!valid_username(""));
-        assert!(!valid_username("1abc"));        // leading digit
-        assert!(!valid_username("Alice"));       // uppercase
-        assert!(!valid_username("a;rm -rf"));    // injection chars
-        assert!(!valid_username("a b"));         // space
+        assert!(!valid_username("1abc")); // leading digit
+        assert!(!valid_username("Alice")); // uppercase
+        assert!(!valid_username("a;rm -rf")); // injection chars
+        assert!(!valid_username("a b")); // space
         assert!(!valid_username(&"x".repeat(33))); // too long
     }
 
@@ -632,8 +708,14 @@ mod tests {
     #[test]
     fn disable_account_protects_critical_and_validates() {
         let r = responder();
-        assert!(!r.execute(&cmd("disable_account", json!({"user": "root"}))).ok);
-        assert!(!r.execute(&cmd("disable_account", json!({"user": "a;rm"}))).ok);
+        assert!(
+            !r.execute(&cmd("disable_account", json!({"user": "root"})))
+                .ok
+        );
+        assert!(
+            !r.execute(&cmd("disable_account", json!({"user": "a;rm"})))
+                .ok
+        );
         assert!(!r.execute(&cmd("disable_account", json!({}))).ok); // missing user
     }
 
@@ -661,7 +743,10 @@ mod tests {
         let link = dir.join("link");
         std::os::unix::fs::symlink("/etc/hostname", &link).unwrap();
         let r = responder();
-        let res = r.execute(&cmd("quarantine_file", json!({ "path": link.to_str().unwrap() })));
+        let res = r.execute(&cmd(
+            "quarantine_file",
+            json!({ "path": link.to_str().unwrap() }),
+        ));
         assert!(!res.ok, "must refuse a symlink target");
         assert!(res.message.contains("symlink"), "msg: {}", res.message);
         // the symlink itself must still exist (we refused before touching it)
@@ -682,7 +767,12 @@ mod tests {
     #[test]
     fn enforcement_unsupported_off_linux_does_not_set_flag() {
         let enf = Enforcement::new();
-        let r = Responder::new(true, "10.0.0.1".into(), enf.clone(), std::env::temp_dir().join("a.log"));
+        let r = Responder::new(
+            true,
+            "10.0.0.1".into(),
+            enf.clone(),
+            std::env::temp_dir().join("a.log"),
+        );
         // On non-Linux these must report failure AND leave the flag false (no faked block).
         assert!(!r.execute(&cmd("block_usb", json!({}))).ok);
         assert!(!enf.usb_blocked.load(std::sync::atomic::Ordering::SeqCst));

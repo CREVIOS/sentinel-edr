@@ -218,7 +218,7 @@ func regular(ts []time.Time) bool {
 	}
 	varc /= float64(len(gaps))
 	cv := (varc / (mean * mean)) // coefficient of variation squared
-	return cv < 0.25            // gaps cluster tightly around the mean
+	return cv < 0.25             // gaps cluster tightly around the mean
 }
 
 func isRemovablePath(path string) bool {

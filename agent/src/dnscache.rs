@@ -50,7 +50,13 @@ impl DnsCache {
         if m.len() >= MAX_ENTRIES {
             m.clear(); // coarse but safe backstop under flooding
         }
-        m.insert(ip, Entry { domain: Some(domain), at: Instant::now() });
+        m.insert(
+            ip,
+            Entry {
+                domain: Some(domain),
+                at: Instant::now(),
+            },
+        );
     }
 
     /// Look up a domain for `ip`. Returns the cached name if fresh; on a miss, kicks off a
@@ -88,7 +94,13 @@ impl DnsCache {
             {
                 let mut m = map.lock().unwrap();
                 if m.len() < MAX_ENTRIES {
-                    m.insert(ip, Entry { domain, at: Instant::now() });
+                    m.insert(
+                        ip,
+                        Entry {
+                            domain,
+                            at: Instant::now(),
+                        },
+                    );
                 }
             }
             inflight.lock().unwrap().remove(&ip);
@@ -163,7 +175,10 @@ mod tests {
         println!("8.8.8.8 -> {:?}", d);
         assert_eq!(d.as_deref(), Some("dns.google"));
         // 1.1.1.1 -> one.one.one.one
-        println!("1.1.1.1 -> {:?}", forward_confirmed_rdns("1.1.1.1".parse().unwrap()));
+        println!(
+            "1.1.1.1 -> {:?}",
+            forward_confirmed_rdns("1.1.1.1".parse().unwrap())
+        );
     }
 
     #[test]
@@ -172,7 +187,7 @@ mod tests {
         let c = DnsCache::new(true);
         let ip: IpAddr = "8.8.8.8".parse().unwrap();
         assert_eq!(c.lookup(ip), None); // miss → spawns background resolve
-        // poll the cache for up to 3s for the background resolve to land
+                                        // poll the cache for up to 3s for the background resolve to land
         let mut got = None;
         for _ in 0..30 {
             std::thread::sleep(std::time::Duration::from_millis(100));

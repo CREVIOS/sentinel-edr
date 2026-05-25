@@ -35,6 +35,7 @@ sha2 = "0.11"
 walkdir = "2"
 libc = "0.2"
 dns-lookup = "3"
+zstd = "0.13"
 # Forward-DNS capture: sniff UDP/53 responses to learn the REAL domain a host connected to
 # (the IP's reverse-PTR is the hosting provider, not the visited name). Needs libpcap at
 # runtime (libpcap0.8) + CAP_NET_RAW; the sniffer fails closed to rDNS if either is missing.

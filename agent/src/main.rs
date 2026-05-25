@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
         // paused by policy: skip telemetry but keep the heartbeat so the console still shows
         // the endpoint online (and still receives commands like un-pause).
         if paused {
-            flush_and_send(&sender, &spool, vec![heartbeat(ticks)]).await;
+            flush_and_send(&sender, &spool, vec![heartbeat(ticks, &spool)]).await;
             continue;
         }
 
@@ -228,7 +228,7 @@ async fn main() -> Result<()> {
         annotate_enforcement(&mut batch, &enforcement);
 
         // always send a heartbeat so the server keeps us "online"
-        batch.push(heartbeat(ticks));
+        batch.push(heartbeat(ticks, &spool));
 
         flush_and_send(&sender, &spool, batch).await;
     }
@@ -304,10 +304,20 @@ fn annotate_enforcement(batch: &mut [event::Event], enf: &Enforcement) {
     }
 }
 
-fn heartbeat(tick: u64) -> event::Event {
+fn heartbeat(tick: u64, spool: &Spool) -> event::Event {
     let mut ev = event::Event::new("system", "heartbeat", "info").msg("agent heartbeat");
     ev.extra
         .insert("tick".into(), serde_json::Value::from(tick));
+    // surface offline backlog so the console knows how much data is pending replay
+    let s = spool.stats();
+    ev.extra
+        .insert("spool_files".into(), serde_json::Value::from(s.files));
+    ev.extra
+        .insert("spool_bytes".into(), serde_json::Value::from(s.bytes));
+    ev.extra.insert(
+        "spool_oldest_age_secs".into(),
+        serde_json::Value::from(s.oldest_age_secs),
+    );
     ev
 }
 

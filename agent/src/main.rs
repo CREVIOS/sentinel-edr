@@ -10,6 +10,7 @@
 mod collectors;
 mod config;
 mod dlp;
+mod ebpf;
 mod event;
 mod respond;
 mod scenario;
@@ -99,6 +100,12 @@ async fn main() -> Result<()> {
     let mut module_c = collectors::ModuleCollector::new();
     let mut rootkit_c = collectors::RootkitCollector::new();
     let mut posture_c = collectors::PostureCollector::new();
+
+    // Telemetry tier: prefer in-kernel eBPF, else auditd/netlink, else userspace polling.
+    // Polling collectors above always run; eBPF (when enabled+supported) augments them with
+    // real-time, no-miss process capture.
+    let tier = ebpf::detect_tier();
+    info!(telemetry_tier = tier.as_str(), "capture tier selected");
 
     info!(
         interval = cli.interval,

@@ -1,0 +1,28 @@
+# Kernel-side eBPF programs for Sentinel (compiled to BPF bytecode, no_std).
+# Build with: cargo +nightly build --release  (requires `bpf-linker`: cargo install bpf-linker)
+# Output object is loaded by the agent's userspace loader (src/ebpf.rs) via aya.
+[package]
+name = "sentinel-ebpf"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+aya-ebpf = "0.1"
+aya-log-ebpf = "0.1"
+
+[[bin]]
+name = "sentinel-ebpf"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 3      # BPF verifier requires optimized output even in dev
+debug = false
+
+[profile.release]
+opt-level = 3
+debug = false
+overflow-checks = false
+
+[workspace]
+# standalone — built separately from the agent crate (different target: bpfel-unknown-none)

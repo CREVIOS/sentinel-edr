@@ -19,9 +19,12 @@ MEM="${BUILD_MEM:-14g}"
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE"; exit 1; }
 
 echo "==> [1/4] building standalone artifact (capped ${MEM})"
-rm -rf "$DASH/.next"
+# The build container runs as root, so its .next is root-owned; a plain `rm -rf` by the
+# deploying user then fails on the next run. Remove with sudo if needed, and chown the fresh
+# output back to the mount owner so subsequent runs (and rsync) stay permission-clean.
+rm -rf "$DASH/.next" 2>/dev/null || sudo rm -rf "$DASH/.next"
 docker run --rm -m "$MEM" -v "$DASH":/app -w /app -e NEXT_TELEMETRY_DISABLED=1 "$NODE_IMG" \
-  bash -c 'corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS=--max-old-space-size=8192 pnpm build'
+  bash -c 'corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS=--max-old-space-size=8192 pnpm build && chown -R "$(stat -c "%u:%g" /app)" /app/.next /app/node_modules 2>/dev/null || true'
 [ -f "$DASH/.next/standalone/server.js" ] || { echo "build produced no standalone output"; exit 1; }
 
 echo "==> [2/4] applying Better Auth migrations"

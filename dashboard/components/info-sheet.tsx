@@ -4,7 +4,6 @@ import * as React from "react";
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
 export type Field = { label: string; value: React.ReactNode; mono?: boolean; wrap?: boolean };
@@ -23,23 +22,27 @@ export function InfoSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-md">
-        <SheetHeader className="border-b">
+      {/* flex column: fixed header + a native-scroll body that fills the rest. (Radix
+          ScrollArea's viewport uses display:table, which sizes to content and defeats
+          truncate/min-w-0 → horizontal overflow; a plain overflow-y-auto block respects
+          width and keeps the footer reachable.) */}
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+        <SheetHeader className="shrink-0 border-b">
           {sub && <SheetDescription className="font-mono text-[10px] uppercase tracking-[0.2em]">{sub}</SheetDescription>}
           <SheetTitle className="font-mono text-base leading-snug">{title}</SheetTitle>
           {badge && <div className="pt-1">{badge}</div>}
         </SheetHeader>
-        <ScrollArea className="h-[calc(100dvh-6rem)]">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <dl className="divide-y">
             {fields.filter((f) => f.value !== undefined && f.value !== null && f.value !== "").map((f, i) => (
-              <div key={i} className="grid grid-cols-[7.5rem_1fr] gap-3 px-5 py-2.5 text-sm">
+              <div key={i} className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-3 px-5 py-2.5 text-sm">
                 <dt className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</dt>
-                <dd className={`${f.mono ? "font-mono text-xs" : ""} ${f.wrap ? "break-words" : "truncate"}`}>{f.value}</dd>
+                <dd className={`min-w-0 ${f.mono ? "font-mono text-xs" : ""} ${f.wrap ? "break-words" : "truncate"}`}>{f.value}</dd>
               </div>
             ))}
           </dl>
           {children && (<><Separator /><div className="p-5">{children}</div></>)}
-        </ScrollArea>
+        </div>
       </SheetContent>
     </Sheet>
   );

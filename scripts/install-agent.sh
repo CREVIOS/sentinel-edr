@@ -115,8 +115,11 @@ RestartSec=5
 OOMScoreAdjust=-1000
 StateDirectory=sentinel
 Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_KILL
-ProtectHome=read-only
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_KILL CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+# An EDR must read AND act (quarantine) on files fleet-wide, so /home must be writable; the
+# responder itself refuses to touch system-critical paths (/usr,/etc,/boot,...). ProtectSystem
+# stays at full so /usr,/boot,/etc remain read-only at the unit level (defence in depth).
+ProtectHome=false
 ProtectSystem=full
 
 [Install]

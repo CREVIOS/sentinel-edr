@@ -82,10 +82,18 @@ static __always_inline __u32 enforce_level(void)
     return v ? *v : 0;
 }
 
-static __always_inline int is_protected_pid(__u32 pid)
+// Returning -EPERM from a conditional gets folded by -O2 into `r0 = -(cond & 1)`, whose range
+// the LSM verifier can't prove is within [-4095, 0]. A noinline constant-returning helper keeps
+// the deny value a tracked constant across the BPF-to-BPF call boundary.
+static __noinline int deny_eperm(void)
 {
-    return bpf_map_lookup_elem(&PROTECTED_PIDS, &pid) != 0;
+    return -EPERM;
 }
+
+// NOTE: LSM hooks must return a value the verifier can prove is in [-4095, 0]. Boolean
+// arithmetic (e.g. `return cond ? -EPERM : 0`) gets compiled to `-(x & 1)` which the verifier
+// can't bound — so every hook below uses explicit pointer-truthiness branches with LITERAL
+// `return 0;` / `return deny_eperm();`.
 
 // fnv-1a over a NUL-terminated path (bounded for the verifier). MUST match the userspace hash.
 static __always_inline __u64 fnv1a(const __u8 *s, int max)
@@ -133,14 +141,14 @@ int BPF_PROG(sentinel_task_kill, struct task_struct *p, struct kernel_siginfo *i
     if (level == 0)
         return 0;
     __u32 target = BPF_CORE_READ(p, tgid);
-    if (!is_protected_pid(target))
-        return 0;
+    if (!bpf_map_lookup_elem(&PROTECTED_PIDS, &target))
+        return 0; // target isn't the agent
     __u32 caller = bpf_get_current_pid_tgid() >> 32;
-    if (is_protected_pid(caller))
+    if (bpf_map_lookup_elem(&PROTECTED_PIDS, &caller))
         return 0; // the agent / guardian may signal themselves
     if (level == 1 && caller == 1)
         return 0; // allow systemd(init) to manage at level 1
-    return -EPERM; // deny: root cannot kill the agent
+    return deny_eperm(); // deny: root cannot kill the agent
 }
 
 // ---------------- enforcement: anti-debug ----------------
@@ -151,12 +159,12 @@ int BPF_PROG(sentinel_ptrace, struct task_struct *child, unsigned int mode)
     if (enforce_level() == 0)
         return 0;
     __u32 target = BPF_CORE_READ(child, tgid);
-    if (!is_protected_pid(target))
+    if (!bpf_map_lookup_elem(&PROTECTED_PIDS, &target))
         return 0;
     __u32 caller = bpf_get_current_pid_tgid() >> 32;
-    if (is_protected_pid(caller))
+    if (bpf_map_lookup_elem(&PROTECTED_PIDS, &caller))
         return 0;
-    return -EPERM;
+    return deny_eperm();
 }
 
 // ---------------- enforcement: exec gate ----------------
@@ -175,7 +183,7 @@ int BPF_PROG(sentinel_bprm, struct linux_binprm *bprm)
         return 0;
     __u64 h = fnv1a(buf, FNAME_LEN);
     if (bpf_map_lookup_elem(&BLOCKED_EXEC, &h))
-        return -EPERM; // blocked binary cannot execute
+        return deny_eperm(); // blocked binary cannot execute
     return 0;
 }
 
@@ -186,13 +194,14 @@ static __always_inline int deny_if_protected_inode(struct dentry *dentry)
     if (enforce_level() == 0)
         return 0;
     __u64 ino = BPF_CORE_READ(dentry, d_inode, i_ino);
-    if (ino && bpf_map_lookup_elem(&PROTECTED_INODES, &ino)) {
-        __u32 caller = bpf_get_current_pid_tgid() >> 32;
-        if (is_protected_pid(caller))
-            return 0; // the agent may replace its own files (self-update)
-        return -EPERM;
-    }
-    return 0;
+    if (ino == 0)
+        return 0;
+    if (!bpf_map_lookup_elem(&PROTECTED_INODES, &ino))
+        return 0; // not one of the agent's files
+    __u32 caller = bpf_get_current_pid_tgid() >> 32;
+    if (bpf_map_lookup_elem(&PROTECTED_PIDS, &caller))
+        return 0; // the agent may replace its own files (self-update)
+    return deny_eperm();
 }
 
 SEC("lsm/inode_unlink")

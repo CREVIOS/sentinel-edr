@@ -1,0 +1,9 @@
+# Sample indicators (replace with a real feed sync). Format: value[,type,severity,source]
+# --- known-bad SHA-256 (EICAR-style placeholder hashes) ---
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f,hash,high,sample
+# --- C2 IPs ---
+198.51.100.23,ip,critical,sample-c2
+203.0.113.66,ip,high,sample-c2
+# --- malicious domains ---
+malware.example.test,domain,critical,sample
+c2.evil.test,domain,high,sample

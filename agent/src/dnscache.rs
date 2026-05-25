@@ -154,6 +154,37 @@ mod tests {
         assert!(is_global("8.8.8.8".parse().unwrap()));
     }
 
+    // Live network test (run: cargo test --release live_ -- --ignored --nocapture).
+    #[test]
+    #[ignore]
+    fn live_forward_confirmed_rdns() {
+        // 8.8.8.8 has a forward-confirmed PTR → dns.google
+        let d = forward_confirmed_rdns("8.8.8.8".parse().unwrap());
+        println!("8.8.8.8 -> {:?}", d);
+        assert_eq!(d.as_deref(), Some("dns.google"));
+        // 1.1.1.1 -> one.one.one.one
+        println!("1.1.1.1 -> {:?}", forward_confirmed_rdns("1.1.1.1".parse().unwrap()));
+    }
+
+    #[test]
+    #[ignore]
+    fn live_cache_populates_async() {
+        let c = DnsCache::new(true);
+        let ip: IpAddr = "8.8.8.8".parse().unwrap();
+        assert_eq!(c.lookup(ip), None); // miss → spawns background resolve
+        // poll the cache for up to 3s for the background resolve to land
+        let mut got = None;
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if let Some(d) = c.lookup(ip) {
+                got = Some(d);
+                break;
+            }
+        }
+        println!("async resolved 8.8.8.8 -> {:?}", got);
+        assert_eq!(got.as_deref(), Some("dns.google"));
+    }
+
     #[test]
     fn negative_cache_holds() {
         // rdns disabled → lookup of an unknown global IP stays None without spawning

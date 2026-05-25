@@ -17,12 +17,13 @@
 use std::fs::OpenOptions;
 use std::io::Write as _;
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use chrono::Utc;
+use sha2::{Digest, Sha256};
 
 use crate::event::{Command as Cmd, CommandResult};
 
@@ -71,6 +72,11 @@ impl Responder {
             "disable_account" => self.disable_account(cmd),
             "block_upload" => self.block_upload(),
             "block_usb" => self.block_usb(),
+            "kill_tree" => self.kill_tree(cmd),
+            "freeze" => self.freeze(cmd, true),
+            "unfreeze" => self.freeze(cmd, false),
+            "quarantine_file" => self.quarantine_file(cmd),
+            "live_triage" => self.live_triage(),
             other => Err(format!("unknown command: {other}")),
         };
         let ok = res.is_ok();
@@ -103,6 +109,124 @@ impl Responder {
         } else {
             Err(format!("kill failed: {}", stderr(&out.stderr)))
         }
+    }
+
+    // -------- whole-process-tree kill (cgroup.kill, else recursive SIGKILL) --------
+    fn kill_tree(&self, cmd: &Cmd) -> Result<String, String> {
+        let pid = cmd.target.get("pid").and_then(|v| v.as_i64()).ok_or("missing pid")? as i32;
+        if pid <= 1 {
+            return Err("refusing to kill pid <= 1".into());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // Prefer cgroup.kill: atomic, race-free against forks (kernel 5.14+).
+            if let Some(dir) = cgroup_dir(pid) {
+                let kf = std::path::Path::new(&dir).join("cgroup.kill");
+                if kf.exists() && std::fs::write(&kf, "1").is_ok() {
+                    return Ok(format!("process tree of {pid} killed via cgroup.kill ({dir})"));
+                }
+            }
+            // Fallback: recursively SIGKILL pid + descendants (collected before killing).
+            let mut victims = Vec::new();
+            collect_descendants(pid, &mut victims);
+            victims.push(pid);
+            let mut killed = 0;
+            for p in &victims {
+                if unsafe { libc::kill(*p, libc::SIGKILL) } == 0 {
+                    killed += 1;
+                }
+            }
+            Ok(format!("process tree of {pid} killed ({killed}/{} pids, recursive SIGKILL)", victims.len()))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err("process-tree kill requires Linux".into())
+        }
+    }
+
+    // -------- cgroup freeze / thaw (forensic hold without killing) --------
+    fn freeze(&self, cmd: &Cmd, freeze: bool) -> Result<String, String> {
+        let pid = cmd.target.get("pid").and_then(|v| v.as_i64()).ok_or("missing pid")? as i32;
+        if pid <= 1 {
+            return Err("refusing to freeze pid <= 1".into());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let dir = cgroup_dir(pid).ok_or("process not in a cgroup v2 group")?;
+            let f = std::path::Path::new(&dir).join("cgroup.freeze");
+            if !f.exists() {
+                return Err("cgroup.freeze unavailable (needs cgroup v2)".into());
+            }
+            std::fs::write(&f, if freeze { "1" } else { "0" }).map_err(|e| format!("write cgroup.freeze: {e}"))?;
+            Ok(format!("process tree of {pid} {} ({dir})", if freeze { "frozen for forensics" } else { "thawed" }))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = freeze;
+            Err("cgroup freeze requires Linux".into())
+        }
+    }
+
+    // -------- quarantine a file (copy → 0000, hash, record for restore) --------
+    fn quarantine_file(&self, cmd: &Cmd) -> Result<String, String> {
+        let path = cmd.target.get("path").and_then(|v| v.as_str()).ok_or("missing path")?;
+        if !valid_quarantine_path(path) {
+            return Err(format!("refusing to quarantine protected path: {path}"));
+        }
+        let src = std::path::Path::new(path);
+        if !src.is_file() {
+            return Err(format!("not a regular file: {path}"));
+        }
+        let data = std::fs::read(src).map_err(|e| format!("read: {e}"))?;
+        let mut h = Sha256::new();
+        h.update(&data);
+        let hash = format!("{:x}", h.finalize());
+        let qdir = std::path::Path::new("/var/lib/sentinel/quarantine");
+        std::fs::create_dir_all(qdir).map_err(|e| format!("mkdir quarantine: {e}"))?;
+        let dest = qdir.join(&hash);
+        write_private(&dest, &data).map_err(|e| format!("write quarantine: {e}"))?;
+        // record original path + perms for restore
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::MetadataExt;
+            src.metadata().map(|m| m.mode()).unwrap_or(0)
+        };
+        #[cfg(not(unix))]
+        let mode = 0u32;
+        let meta = serde_json::json!({ "original": path, "sha256": hash, "mode": mode, "ts": Utc::now().to_rfc3339() });
+        let _ = write_private(&qdir.join(format!("{hash}.json")), meta.to_string().as_bytes());
+        // neutralize the original: chmod 000 then remove (copy is safe in quarantine)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(src, std::fs::Permissions::from_mode(0o000));
+        }
+        std::fs::remove_file(src).map_err(|e| format!("remove original: {e}"))?;
+        Ok(format!("quarantined {path} (sha256 {}…) → /var/lib/sentinel/quarantine", &hash[..16]))
+    }
+
+    // -------- on-demand live triage snapshot --------
+    fn live_triage(&self) -> Result<String, String> {
+        let procs = Command::new("ps").args(["-eo", "pid,ppid,user,comm,args", "--sort=-%cpu"]).output().ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().take(40).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+        #[cfg(target_os = "linux")]
+        let socks = Command::new("ss").args(["-tunp"]).output().ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).lines().take(60).collect::<Vec<_>>().join("\n")).unwrap_or_default();
+        #[cfg(not(target_os = "linux"))]
+        let socks = String::new();
+        let modules = std::fs::read_to_string("/proc/modules").unwrap_or_default()
+            .lines().filter_map(|l| l.split_whitespace().next()).take(80).collect::<Vec<_>>().join(",");
+        let summary = format!(
+            "triage: {} procs sampled, {} socket rows, {} modules",
+            procs.lines().count(), socks.lines().count(), modules.split(',').filter(|s| !s.is_empty()).count()
+        );
+        // write the full snapshot to the audit dir for retrieval; return a summary inline.
+        let dir = std::path::Path::new("/var/lib/sentinel/triage");
+        if std::fs::create_dir_all(dir).is_ok() {
+            let f = dir.join(format!("triage-{}.txt", Utc::now().timestamp()));
+            let _ = write_private(&f, format!("== PROCESSES ==\n{procs}\n\n== SOCKETS ==\n{socks}\n\n== MODULES ==\n{modules}\n").as_bytes());
+        }
+        Ok(summary)
     }
 
     // -------- isolation (dedicated nft table) --------
@@ -373,6 +497,68 @@ fn which(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Resolve a pid's cgroup-v2 directory under /sys/fs/cgroup (for cgroup.kill/freeze).
+#[cfg(target_os = "linux")]
+fn cgroup_dir(pid: i32) -> Option<String> {
+    let body = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+    // cgroup v2 unified line: "0::/path"
+    for line in body.lines() {
+        if let Some(rest) = line.strip_prefix("0::") {
+            let p = format!("/sys/fs/cgroup{}", rest.trim());
+            if Path::new(&p).is_dir() {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// Collect all descendant pids of `pid` (BFS over /proc/<pid>/task/*/children).
+#[cfg(target_os = "linux")]
+fn collect_descendants(pid: i32, out: &mut Vec<i32>) {
+    let mut stack = vec![pid];
+    let mut depth = 0;
+    while let Some(p) = stack.pop() {
+        depth += 1;
+        if depth > 100_000 {
+            break;
+        }
+        if let Ok(tasks) = std::fs::read_dir(format!("/proc/{p}/task")) {
+            for t in tasks.flatten() {
+                if let Ok(ch) = std::fs::read_to_string(t.path().join("children")) {
+                    for c in ch.split_whitespace().filter_map(|s| s.parse::<i32>().ok()) {
+                        if c > 1 && !out.contains(&c) {
+                            out.push(c);
+                            stack.push(c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Guard quarantine targets: never touch system-critical paths.
+fn valid_quarantine_path(path: &str) -> bool {
+    if !path.starts_with('/') || path.contains("..") {
+        return false;
+    }
+    const PROTECTED: [&str; 8] = ["/bin/", "/sbin/", "/usr/", "/lib/", "/lib64/", "/etc/", "/boot/", "/proc/"];
+    !PROTECTED.iter().any(|p| path.starts_with(p))
+}
+
+/// Write a 0600 file (overwrite), for quarantine/triage artifacts.
+#[cfg(unix)]
+fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(path)?;
+    f.write_all(data)
+}
+#[cfg(not(unix))]
+fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    std::fs::write(path, data)
+}
+
 #[cfg(unix)]
 fn private_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -443,6 +629,26 @@ mod tests {
     #[test]
     fn unknown_command_is_rejected() {
         assert!(!responder().execute(&cmd("nuke_everything", json!({}))).ok);
+    }
+
+    #[test]
+    fn quarantine_guards_protected_paths() {
+        assert!(!valid_quarantine_path("/etc/passwd"));
+        assert!(!valid_quarantine_path("/usr/bin/ls"));
+        assert!(!valid_quarantine_path("/bin/sh"));
+        assert!(!valid_quarantine_path("../etc/shadow"));
+        assert!(!valid_quarantine_path("relative/path"));
+        assert!(valid_quarantine_path("/home/user/Downloads/malware.bin"));
+        assert!(valid_quarantine_path("/tmp/dropper"));
+    }
+
+    #[test]
+    fn tree_and_freeze_validate_pid() {
+        let r = responder();
+        assert!(!r.execute(&cmd("kill_tree", json!({"pid": 1}))).ok);
+        assert!(!r.execute(&cmd("kill_tree", json!({}))).ok);
+        assert!(!r.execute(&cmd("freeze", json!({"pid": 0}))).ok);
+        assert!(!r.execute(&cmd("freeze", json!({}))).ok);
     }
 
     #[cfg(not(target_os = "linux"))]

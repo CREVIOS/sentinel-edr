@@ -202,11 +202,16 @@ type ResponseType string
 
 const (
 	RespKillProcess    ResponseType = "kill_process"
+	RespKillTree       ResponseType = "kill_tree"
 	RespIsolate        ResponseType = "isolate"
 	RespUnisolate      ResponseType = "unisolate"
 	RespDisableAccount ResponseType = "disable_account"
 	RespBlockUpload    ResponseType = "block_upload"
 	RespBlockUSB       ResponseType = "block_usb"
+	RespFreeze         ResponseType = "freeze"
+	RespUnfreeze       ResponseType = "unfreeze"
+	RespQuarantine     ResponseType = "quarantine_file"
+	RespLiveTriage     ResponseType = "live_triage"
 )
 
 type ResponseStatus string

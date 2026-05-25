@@ -14,18 +14,32 @@ DASH="$(cd "$HERE/../../dashboard" && pwd)"
 ENV_FILE="$HERE/.env"
 NET="sentinel_internal"
 NODE_IMG="node:22-bookworm-slim"
-MEM="${BUILD_MEM:-14g}"
+NODE_HEAP="${NODE_HEAP:-8192}"
+# No `docker -m` cap here: a cgroup memory cap makes Next 16's per-CPU build workers get
+# SIGKILLed under transient pressure (next then exits 1 — NOT a kernel OOM), which is what
+# broke this build. The host has ~120g; let the build use what it needs. Set BUILD_MEM to
+# re-impose a cap only if a co-tenant needs protecting.
+MEM_FLAG=""
+[ -n "${BUILD_MEM:-}" ] && MEM_FLAG="-m ${BUILD_MEM}"
 
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE"; exit 1; }
 
-echo "==> [1/4] building standalone artifact (capped ${MEM})"
+echo "==> [1/4] building standalone artifact ${MEM_FLAG:-(uncapped)}"
 # The build container runs as root, so its .next is root-owned; a plain `rm -rf` by the
 # deploying user then fails on the next run. Remove with sudo if needed, and chown the fresh
 # output back to the mount owner so subsequent runs (and rsync) stay permission-clean.
 rm -rf "$DASH/.next" 2>/dev/null || sudo rm -rf "$DASH/.next"
-docker run --rm -m "$MEM" -v "$DASH":/app -w /app -e NEXT_TELEMETRY_DISABLED=1 "$NODE_IMG" \
-  bash -c 'corepack enable && pnpm install --frozen-lockfile && NODE_OPTIONS=--max-old-space-size=8192 pnpm build && chown -R "$(stat -c "%u:%g" /app)" /app/.next /app/node_modules 2>/dev/null || true'
+# Build form matters: `pnpm build` (the npm-script wrapper) intermittently has its `next build`
+# worker SIGKILLed on this host, while invoking `pnpm exec next build` directly with the heap
+# passed as a real env var (-e NODE_OPTIONS, not an inline prefix) is reliable. Keep this form.
+docker run --rm $MEM_FLAG -v "$DASH":/app -w /app \
+  -e NEXT_TELEMETRY_DISABLED=1 -e NODE_OPTIONS="--max-old-space-size=$NODE_HEAP" "$NODE_IMG" \
+  bash -c 'corepack enable && pnpm install --frozen-lockfile && pnpm exec next build --webpack'
 [ -f "$DASH/.next/standalone/server.js" ] || { echo "build produced no standalone output"; exit 1; }
+# chown the root-owned build output back to the deploying user in a separate run, so the next
+# `rm -rf .next` / rsync don't need sudo.
+docker run --rm -v "$DASH":/app -w /app "$NODE_IMG" \
+  chown -R "$(id -u):$(id -g)" /app/.next /app/node_modules 2>/dev/null || true
 
 echo "==> [2/4] applying Better Auth migrations"
 # Pull the real DATABASE_URL/secret from the running dashboard if present, else from .env.

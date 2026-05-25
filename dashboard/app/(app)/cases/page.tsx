@@ -121,6 +121,19 @@ export default function CasesPage() {
         sub={detail ? `${detail.severity} · ${detail.status}` : ""}
         badge={detail && <Sev s={detail.severity} />}
         fields={detail ? fields(detail) : []}
+        footer={detail && (
+          <div className="flex items-end gap-2">
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={1}
+              placeholder="Add an investigation note…"
+              className="max-h-28 min-h-9 flex-1 resize-none text-sm"
+              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addNote(detail.id); }}
+            />
+            <Button size="sm" className="shrink-0" disabled={!note.trim()} onClick={() => addNote(detail.id)}>Add note</Button>
+          </div>
+        )}
       >
         {detail && (
           <div className="space-y-4">
@@ -141,12 +154,12 @@ export default function CasesPage() {
               <div className="space-y-1.5">
                 {(detail.detections || []).map((d) => (
                   <div key={d.id} className="flex items-start gap-2 rounded-md border border-border/60 p-2 text-sm">
-                    <Sev s={d.severity} />
+                    <div className="shrink-0"><Sev s={d.severity} /></div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-mono text-xs">{d.rule_name}</div>
                       <div className="truncate text-xs text-muted-foreground">{d.summary}</div>
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">{ago(d.ts)}</span>
+                    <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{ago(d.ts)}</span>
                   </div>
                 ))}
                 {(!detail.detections || detail.detections.length === 0) && <div className="text-xs text-muted-foreground">none</div>}
@@ -155,24 +168,20 @@ export default function CasesPage() {
 
             <Separator />
 
-            {/* notes / timeline */}
+            {/* notes timeline (composer is pinned in the footer) */}
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Notes</div>
               <div className="space-y-2">
                 {(detail.notes || []).map((n, i) => (
                   <div key={i} className="rounded-md bg-muted/40 p-2 text-sm">
-                    <div className="mb-0.5 flex items-center justify-between text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{n.author}</span>
-                      <span>{new Date(n.ts).toLocaleString()}</span>
+                    <div className="mb-0.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="truncate font-medium text-foreground">{n.author}</span>
+                      <span className="shrink-0 whitespace-nowrap">{new Date(n.ts).toLocaleString()}</span>
                     </div>
-                    <div className="whitespace-pre-wrap">{n.body}</div>
+                    <div className="whitespace-pre-wrap break-words">{n.body}</div>
                   </div>
                 ))}
                 {(!detail.notes || detail.notes.length === 0) && <div className="text-xs text-muted-foreground">no notes yet</div>}
-              </div>
-              <div className="mt-2 space-y-2">
-                <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Add an investigation note…" className="text-sm" />
-                <Button size="sm" className="w-full" disabled={!note.trim()} onClick={() => addNote(detail.id)}>Add note</Button>
               </div>
             </div>
           </div>

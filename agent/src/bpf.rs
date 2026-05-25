@@ -192,6 +192,7 @@ fn parent_pid() -> u32 {
 fn to_event(e: &ExecEvent) -> Event {
     let name = cstr(&e.comm);
     let exe = cstr(&e.filename);
+    let hash = crate::collectors::exe_hash(&exe);
     let mut ev = Event::new("process", "exec", "info")
         .with_user(&uid_name(e.uid))
         .msg(format!("{} executed (ebpf): {}", name, exe));
@@ -202,6 +203,7 @@ fn to_event(e: &ExecEvent) -> Event {
         exe,
         uid: e.uid as i64,
         user: uid_name(e.uid),
+        hash,
         ..Default::default()
     });
     ev

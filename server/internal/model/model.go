@@ -59,6 +59,7 @@ type Process struct {
 	Parent    string `json:"parent,omitempty"`    // immediate parent process name
 	Lineage   string `json:"lineage,omitempty"`   // full ancestry chain (pid1→…→self)
 	Container string `json:"container,omitempty"` // container id+runtime if running in one
+	Hash      string `json:"hash,omitempty"`      // sha256 of the executed binary (IOC matching)
 }
 
 // FileInfo describes a filesystem operation.

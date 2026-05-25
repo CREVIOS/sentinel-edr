@@ -21,6 +21,54 @@ use walkdir::WalkDir;
 use crate::dlp;
 use crate::event::{AuthInfo, DlpInfo, Event, FileInfo, NetInfo, Process, UsbInfo};
 
+/// sha256 of an executed binary — exact identity for IOC matching (path/name can be faked).
+/// Cached by path+mtime so the common case (re-exec of the same binary) is a map hit, not a read.
+/// Shared by the polling ProcessCollector and the eBPF exec path.
+pub(crate) fn exe_hash(path: &str) -> String {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    if !path.starts_with('/') {
+        return String::new(); // memfd/anon/relative — nothing on disk to hash
+    }
+    let mtime = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    static CACHE: OnceLock<Mutex<HashMap<String, (u64, String)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(c) = cache.lock() {
+        if let Some((mt, h)) = c.get(path) {
+            if *mt == mtime {
+                return h.clone();
+            }
+        }
+    }
+    let h = match std::fs::read(path) {
+        Ok(data) if data.len() <= 64 * 1024 * 1024 => {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(&data);
+            hasher
+                .finalize()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        }
+        _ => String::new(),
+    };
+    if !h.is_empty() {
+        if let Ok(mut c) = cache.lock() {
+            if c.len() > 8192 {
+                c.clear();
+            }
+            c.insert(path.to_string(), (mtime, h.clone()));
+        }
+    }
+    h
+}
+
 /// Categorize a destination domain for internet/browser monitoring.
 pub fn categorize_domain(domain: &str) -> &'static str {
     let d = domain.to_lowercase();
@@ -156,6 +204,7 @@ impl ProcessCollector {
             chain.reverse();
             let lineage = chain.join("→");
             let container = container_of(pidu);
+            let hash = exe_hash(&exe);
             let sev = if is_suspicious(&name, &cmdline) {
                 "medium"
             } else {
@@ -175,6 +224,7 @@ impl ProcessCollector {
                 parent,
                 lineage,
                 container,
+                hash,
             });
             out.push(ev);
         }

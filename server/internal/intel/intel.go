@@ -177,6 +177,12 @@ func (e *Engine) Match(ev *model.Event) []*model.Detection {
 			add("hash", ev.File.Hash, ind.source, ind.severity)
 		}
 	}
+	// executed-binary hash (sha256) — exact identity match against known-bad hashes
+	if ev.Process != nil && ev.Process.Hash != "" {
+		if ind, ok := e.hashes[strings.ToLower(ev.Process.Hash)]; ok {
+			add("hash", ev.Process.Hash, ind.source, ind.severity)
+		}
+	}
 	if ev.Network != nil {
 		if host := ipOnly(ev.Network.Remote); host != "" {
 			if ind, ok := e.ips[host]; ok {

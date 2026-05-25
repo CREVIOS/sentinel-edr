@@ -27,6 +27,9 @@ pub struct Process {
     pub lineage: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub container: String,
+    /// sha256 of the executed binary (exact identity for IOC matching).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub hash: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

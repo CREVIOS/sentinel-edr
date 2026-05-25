@@ -171,6 +171,7 @@ fn proc_event(user: &str, pid: i64, parent: &str, name: &str, cmd: &str, sev: &s
         parent: parent.into(),
         lineage: format!("{parent}→{name}"),
         container: String::new(),
+        hash: String::new(),
     });
     ev
 }

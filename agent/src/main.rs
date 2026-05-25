@@ -36,6 +36,7 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    harden_self();
     let labels = config::parse_csv(&cli.labels);
     let state_path = AgentState::path(&cli);
     let tls = TLSConfig::from_cli(&cli);
@@ -263,6 +264,22 @@ fn host_only(url: &str) -> String {
 }
 
 /// A future that resolves on SIGINT/SIGTERM.
+/// Agent self-protection: make the agent hard to OOM-kill and not core-dumpable, so it
+/// survives memory pressure and won't leak its memory (keys/spool) to a dump. The systemd
+/// unit already sets Restart=always for watchdog recovery; eBPF-LSM kill/ptrace blocking is
+/// the documented next tier (needs a kernel test-bed). Best-effort — failures are non-fatal.
+fn harden_self() {
+    #[cfg(target_os = "linux")]
+    {
+        // oom_score_adj = -1000 → exempt from the OOM killer.
+        let _ = std::fs::write("/proc/self/oom_score_adj", b"-1000");
+        // PR_SET_DUMPABLE = 0 → no core dumps / ptrace-attach of our memory.
+        unsafe {
+            libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+        }
+    }
+}
+
 fn signal_stream() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
     Box::pin(async {
         // Handle SIGTERM too — that's what `systemctl stop` sends; without it the agent is

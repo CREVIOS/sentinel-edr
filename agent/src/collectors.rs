@@ -1249,13 +1249,15 @@ impl AuthLogCollector {
 pub struct NetworkCollector {
     seen: HashSet<String>,
     first: bool,
+    dns: crate::dnscache::DnsCache,
 }
 
 impl NetworkCollector {
-    pub fn new() -> Self {
+    pub fn new(dns: crate::dnscache::DnsCache) -> Self {
         NetworkCollector {
             seen: HashSet::new(),
             first: true,
+            dns,
         }
     }
 
@@ -1271,16 +1273,23 @@ impl NetworkCollector {
                 } else {
                     format!(" by {} (pid {})", conn.process, conn.pid)
                 };
+                // Attribute the remote IP to a domain (eBPF DNS cache → best-effort rDNS).
+                let domain = remote_ip(&conn.remote)
+                    .and_then(|ip| self.dns.lookup(ip))
+                    .unwrap_or_default();
+                let dest = if domain.is_empty() { conn.remote.clone() } else { format!("{} [{}]", domain, conn.remote) };
                 let mut ev = Event::new("network", "connect", "info").msg(format!(
                     "outbound {} connection to {}{}",
-                    conn.proto, conn.remote, who
+                    conn.proto, dest, who
                 ));
+                let category = if domain.is_empty() { conn.category() } else { categorize_domain(&domain).to_string() };
                 ev.network = Some(NetInfo {
                     direction: "outbound".into(),
                     proto: conn.proto.clone(),
                     local_addr: conn.local.clone(),
                     remote: conn.remote.clone(),
-                    category: conn.category(),
+                    domain,
+                    category,
                     bytes_out: conn.bytes_out,
                     bytes_in: conn.bytes_in,
                     ..Default::default()
@@ -1457,6 +1466,19 @@ fn remote_port(addr: &str) -> Option<String> {
     trimmed
         .rsplit_once(':')
         .map(|(_, port)| port.trim_matches(']').to_string())
+}
+
+/// Parse the IP from an "ip:port" string (handles IPv4 `1.2.3.4:443` and IPv6 `[2001:db8::1]:443`).
+fn remote_ip(addr: &str) -> Option<std::net::IpAddr> {
+    let a = addr.trim().trim_end_matches(',');
+    let host = if let Some(rest) = a.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("") // [v6]:port
+    } else if a.matches(':').count() == 1 {
+        a.rsplit_once(':').map(|(h, _)| h).unwrap_or(a) // v4:port
+    } else {
+        a // bare v6 or bare ip
+    };
+    host.parse().ok()
 }
 
 fn truncate(s: &str, n: usize) -> String {

@@ -34,6 +34,7 @@ regex = "1"
 sha2 = "0.11"
 walkdir = "2"
 libc = "0.2"
+dns-lookup = "3"
 
 # eBPF userspace loader — only pulled in with `--features ebpf` (needs aya + a CO-RE/BTF
 # kernel). The default build ships the polling collectors with zero eBPF deps.

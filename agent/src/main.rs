@@ -10,6 +10,7 @@
 mod collectors;
 mod config;
 mod dlp;
+mod dnscache;
 mod ebpf;
 mod event;
 mod respond;
@@ -87,6 +88,17 @@ async fn main() -> Result<()> {
         responder,
     ));
 
+    // Telemetry tier: prefer in-kernel eBPF, else auditd/netlink, else userspace polling.
+    // Polling collectors below always run; eBPF (when enabled+supported) augments them with
+    // real-time, no-miss process capture.
+    let tier = ebpf::detect_tier();
+    info!(telemetry_tier = tier.as_str(), "capture tier selected");
+
+    // Shared IP→domain cache for network attribution. With the authoritative eBPF DNS feed it
+    // is filled from observed DNS responses; otherwise best-effort forward-confirmed reverse DNS
+    // enriches it. (eBPF DNS-fill flips rDNS off once wired.)
+    let dns = dnscache::DnsCache::new(tier != ebpf::Tier::Ebpf);
+
     // --- collectors ---
     let watch = config::parse_csv(&cli.watch);
     let mut proc_c = collectors::ProcessCollector::new();
@@ -94,18 +106,12 @@ async fn main() -> Result<()> {
     let mut usb_c = collectors::UsbCollector::new();
     let mut fim_c = collectors::FimCollector::new(watch);
     let mut pkg_c = collectors::PackageCollector::new();
-    let mut net_c = collectors::NetworkCollector::new();
+    let mut net_c = collectors::NetworkCollector::new(dns.clone());
     let mut authlog_c = collectors::AuthLogCollector::new();
     let mut mount_c = collectors::MountCollector::new();
     let mut module_c = collectors::ModuleCollector::new();
     let mut rootkit_c = collectors::RootkitCollector::new();
     let mut posture_c = collectors::PostureCollector::new();
-
-    // Telemetry tier: prefer in-kernel eBPF, else auditd/netlink, else userspace polling.
-    // Polling collectors above always run; eBPF (when enabled+supported) augments them with
-    // real-time, no-miss process capture.
-    let tier = ebpf::detect_tier();
-    info!(telemetry_tier = tier.as_str(), "capture tier selected");
 
     info!(
         interval = cli.interval,

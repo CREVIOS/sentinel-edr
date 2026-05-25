@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sentinel/server/internal/baseline"
 	"github.com/sentinel/server/internal/behavior"
 	"github.com/sentinel/server/internal/bus"
 	"github.com/sentinel/server/internal/cases"
@@ -38,6 +39,7 @@ type Processor struct {
 	notify   *notify.Notifier
 	tune     *tune.Engine
 	cases    *cases.Correlator
+	baseline *baseline.Engine
 	log      *slog.Logger
 }
 
@@ -57,6 +59,9 @@ func (p *Processor) WithTuning(t *tune.Engine) *Processor { p.tune = t; return p
 
 // WithCases attaches the case correlator. Optional; nil → no auto case grouping.
 func (p *Processor) WithCases(c *cases.Correlator) *Processor { p.cases = c; return p }
+
+// WithBaseline attaches the per-host behavioral baseline. Optional; nil → no anomaly detection.
+func (p *Processor) WithBaseline(b *baseline.Engine) *Processor { p.baseline = b; return p }
 
 // StartProcessors subscribes the stateless detection/DLP consumer (queue group).
 func (p *Processor) StartProcessors(b bus.Bus) error {
@@ -109,6 +114,14 @@ func (p *Processor) processStateless(ev model.Event) error {
 	// Threat-intel IOC matching (hash/ip/domain) — emits its own detections.
 	if p.intel != nil {
 		for _, d := range p.intel.Match(&ev) {
+			if err := p.emit(d, &ev, ""); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	// Per-host behavioral baseline — first-seen-deviation anomalies.
+	if p.baseline != nil {
+		for _, d := range p.baseline.Observe(&ev) {
 			if err := p.emit(d, &ev, ""); err != nil {
 				errs = append(errs, err)
 			}

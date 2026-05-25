@@ -13,11 +13,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/sentinel/server/internal/api"
 	"github.com/sentinel/server/internal/auth"
+	"github.com/sentinel/server/internal/baseline"
 	"github.com/sentinel/server/internal/behavior"
 	"github.com/sentinel/server/internal/bus"
 	"github.com/sentinel/server/internal/cases"
@@ -133,8 +135,20 @@ func main() {
 	caseCorr := cases.New(st, log)
 	caseCorr.Seed()
 
+	// Per-host behavioral baseline (anomaly detection). Learn period is configurable; default
+	// 24h, set higher (7-30d) in production for fewer false positives, lower to demo faster.
+	learnHours := 24
+	if v := os.Getenv("SENTINEL_BASELINE_LEARN_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			learnHours = n
+		}
+	}
+	baselineEng := baseline.New(time.Duration(learnHours) * time.Hour)
+	log.Info("baseline anomaly engine", "learn_hours", learnHours)
+
 	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).
-		WithIntel(intelEng).WithNotify(notifier).WithTuning(tuneEng).WithCases(caseCorr)
+		WithIntel(intelEng).WithNotify(notifier).WithTuning(tuneEng).WithCases(caseCorr).
+		WithBaseline(baselineEng)
 
 	if cfg.RunsRole("worker") {
 		if err := proc.StartProcessors(busB); err != nil {

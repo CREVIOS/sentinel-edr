@@ -32,10 +32,18 @@ jobs:
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          # fail only on advisories in our dependencies; stdlib advisories track the
-          # toolchain (the release image rebuilds on the latest patched go).
-          govulncheck ./... || true
-          govulncheck -scan module ./...
+          # Fail the build on advisories in OUR third-party dependencies, but treat stdlib
+          # advisories as non-fatal: they track the Go toolchain (the release image rebuilds
+          # on the latest patched go), and govulncheck's DB is routinely ahead of the runner's
+          # toolchain patch level. Parse the JSON and gate on the finding's module.
+          govulncheck -format json ./... > govulncheck.json || true
+          govulncheck ./... || true   # human-readable report in the log (never fatal here)
+          if jq -e 'select(.finding!=null) | .finding.trace[0].module
+                    | select(.!="stdlib" and .!="toolchain")' govulncheck.json >/dev/null; then
+            echo "::error::govulncheck found advisories in third-party dependencies"
+            exit 1
+          fi
+          echo "No third-party dependency vulnerabilities (stdlib advisories track the toolchain)."
 
   agent:
     name: Rust agent (test · clippy · audit)

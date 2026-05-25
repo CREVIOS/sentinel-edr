@@ -42,6 +42,33 @@ struct {
     __uint(max_entries, 1 << 20); // 1 MiB
 } EXEC_EVENTS SEC(".maps");
 
+// Tamper-attempt channel: every LSM denial (someone tried to kill/ptrace/delete the agent) is
+// reported here so userspace can raise a high-severity detection — tampering is loud, not silent.
+struct tamper_event {
+    __u32 caller_pid;
+    __u32 target_pid;
+    __u32 hook; // 1=kill, 2=ptrace, 3=file
+    __u32 sig;  // signal number (kill) else 0
+    __u8 caller_comm[TASK_COMM_LEN];
+};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 16); // 64 KiB — denials are rare
+} TAMPER_EVENTS SEC(".maps");
+
+static __always_inline void report_tamper(__u32 target, __u32 hook, __u32 sig)
+{
+    struct tamper_event *t = bpf_ringbuf_reserve(&TAMPER_EVENTS, sizeof(*t), 0);
+    if (!t)
+        return;
+    t->caller_pid = bpf_get_current_pid_tgid() >> 32;
+    t->target_pid = target;
+    t->hook = hook;
+    t->sig = sig;
+    bpf_get_current_comm(&t->caller_comm, sizeof(t->caller_comm));
+    bpf_ringbuf_submit(t, 0);
+}
+
 // PIDs the agent protects (its own pid + the guardian). Userspace writes these at startup.
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -148,15 +175,22 @@ int BPF_PROG(sentinel_task_kill, struct task_struct *p, struct kernel_siginfo *i
         return 0; // the agent / guardian may signal themselves
     if (level == 1 && caller == 1)
         return 0; // allow systemd(init) to manage at level 1
+    report_tamper(target, 1, (__u32)sig);
     return deny_eperm(); // deny: root cannot kill the agent
 }
 
 // ---------------- enforcement: anti-debug ----------------
 
+#define PTRACE_MODE_ATTACH 0x02
+
 SEC("lsm/ptrace_access_check")
 int BPF_PROG(sentinel_ptrace, struct task_struct *child, unsigned int mode)
 {
     if (enforce_level() == 0)
+        return 0;
+    // Only block real debugger ATTACH. PTRACE_MODE_READ is used by ss/ps/lsof to map
+    // sockets/fds to pids (incl. the agent's own `ss`) — denying that floods false positives.
+    if ((mode & PTRACE_MODE_ATTACH) == 0)
         return 0;
     __u32 target = BPF_CORE_READ(child, tgid);
     if (!bpf_map_lookup_elem(&PROTECTED_PIDS, &target))
@@ -164,6 +198,7 @@ int BPF_PROG(sentinel_ptrace, struct task_struct *child, unsigned int mode)
     __u32 caller = bpf_get_current_pid_tgid() >> 32;
     if (bpf_map_lookup_elem(&PROTECTED_PIDS, &caller))
         return 0;
+    report_tamper(target, 2, 0);
     return deny_eperm();
 }
 
@@ -201,6 +236,7 @@ static __always_inline int deny_if_protected_inode(struct dentry *dentry)
     __u32 caller = bpf_get_current_pid_tgid() >> 32;
     if (bpf_map_lookup_elem(&PROTECTED_PIDS, &caller))
         return 0; // the agent may replace its own files (self-update)
+    report_tamper(0, 3, 0);
     return deny_eperm();
 }
 

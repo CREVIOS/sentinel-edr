@@ -26,6 +26,18 @@ struct ExecEvent {
     filename: [u8; 256],
 }
 
+/// Mirror of `struct tamper_event` — emitted by the LSM hooks when a kill/ptrace/file-write
+/// against the agent is denied.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TamperEvent {
+    caller_pid: u32,
+    target_pid: u32,
+    hook: u32, // 1=kill, 2=ptrace, 3=file
+    sig: u32,
+    caller_comm: [u8; 16],
+}
+
 pub type Sink = Arc<Mutex<Vec<Event>>>;
 
 /// LSM enforcement level (matches the ENFORCE map in the kernel program).
@@ -134,6 +146,21 @@ pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
         }
         0
     })?;
+    // drain tamper-attempt events (LSM denials) → critical detections on the same sink.
+    // bound at this scope (not inside the `if let`) so the map outlives the builder borrow.
+    let tamper_map = obj.maps().find(|m| m.name() == "TAMPER_EVENTS");
+    if let Some(tm) = &tamper_map {
+        let sink3 = sink.clone();
+        rbb.add(tm, move |data: &[u8]| {
+            if data.len() >= core::mem::size_of::<TamperEvent>() {
+                let t = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const TamperEvent) };
+                if let Ok(mut q) = sink3.lock() {
+                    q.push(to_tamper_event(&t));
+                }
+            }
+            0
+        })?;
+    }
     let rb = rbb.build()?;
     std::thread::Builder::new()
         .name("bpf-ringbuf".into())
@@ -175,6 +202,26 @@ fn to_event(e: &ExecEvent) -> Event {
         exe,
         uid: e.uid as i64,
         user: uid_name(e.uid),
+        ..Default::default()
+    });
+    ev
+}
+
+fn to_tamper_event(t: &TamperEvent) -> Event {
+    let comm = cstr(&t.caller_comm);
+    let hook = match t.hook {
+        1 => "kill",
+        2 => "ptrace",
+        3 => "file-write/delete",
+        _ => "unknown",
+    };
+    let mut ev = Event::new("system", "tamper_attempt", "critical").msg(format!(
+        "tamper attempt BLOCKED: {hook} of the Sentinel agent by {comm} (pid {}, target pid {}, sig {})",
+        t.caller_pid, t.target_pid, t.sig
+    ));
+    ev.process = Some(Process {
+        pid: t.caller_pid as i64,
+        name: comm,
         ..Default::default()
     });
     ev

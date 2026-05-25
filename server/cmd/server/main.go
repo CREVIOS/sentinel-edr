@@ -108,10 +108,14 @@ func main() {
 	if cfg.Correlate && cfg.RunsRole("correlator") {
 		behaviorEng = behavior.New()
 	}
-	var notifier *notify.Notifier
-	if cfg.AlertWebhook != "" {
-		notifier = notify.New(cfg.AlertWebhook, notify.Kind(cfg.AlertKind), cfg.AlertMinSev, log)
-		log.Info("alerting enabled", "kind", cfg.AlertKind, "min_severity", cfg.AlertMinSev)
+	notifier := notify.New(notify.Config{
+		MinSeverity: cfg.AlertMinSev,
+		WebhookURL:  cfg.AlertWebhook, WebhookKind: notify.Kind(cfg.AlertKind),
+		SMTPHost: cfg.SMTPHost, SMTPPort: cfg.SMTPPort, SMTPUser: cfg.SMTPUser, SMTPPass: cfg.SMTPPass,
+		MailFrom: cfg.AlertMailFrom, MailTo: cfg.AlertMailTo, SMTPTLS: cfg.SMTPTLS,
+	}, log)
+	if notifier != nil {
+		log.Info("alerting enabled", "sinks", notifier.Sinks(), "min_severity", cfg.AlertMinSev)
 	}
 	proc := pipeline.New(st, det, dlpEng, behaviorEng, resp, bcast, log).WithIntel(intelEng).WithNotify(notifier)
 

@@ -12,25 +12,33 @@ import (
 
 // Config is the resolved server configuration.
 type Config struct {
-	Env            string // development | production — production enforces hard security gates
-	Role           string // all | ingest | worker | correlator | gateway
-	HTTPAddr       string // listen address for the HTTP/API/WS server
-	DatabaseURL    string // postgres:// DSN (TimescaleDB)
-	NatsURL        string // nats:// URL ("" => in-process memory bus, all-in-one only)
-	RedisURL       string // optional, for distributed rate limiting / cache
-	JWTSecret      string // HMAC secret for console JWTs
-	EnrollToken    string // shared secret required to enroll a new agent
-	AdminUser      string
-	AdminPass      string // bootstrap admin password (bcrypt-hashed at startup)
-	TLSCert        string // path to server TLS cert (enables HTTPS)
-	TLSKey         string // path to server TLS key
-	TLSClientCA    string // path to CA that signs agent client certs (enables mTLS)
-	BehindProxy    bool   // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
-	RulesDir       string // directory of Sigma-style YAML rules
-	IOCDir         string // directory of threat-intel IOC feed files (hash/ip/domain)
-	AlertWebhook   string // webhook URL for detection alerts ("" disables)
-	AlertKind      string // slack | discord | generic
-	AlertMinSev    string // minimum severity to alert (default high)
+	Env          string // development | production — production enforces hard security gates
+	Role         string // all | ingest | worker | correlator | gateway
+	HTTPAddr     string // listen address for the HTTP/API/WS server
+	DatabaseURL  string // postgres:// DSN (TimescaleDB)
+	NatsURL      string // nats:// URL ("" => in-process memory bus, all-in-one only)
+	RedisURL     string // optional, for distributed rate limiting / cache
+	JWTSecret    string // HMAC secret for console JWTs
+	EnrollToken  string // shared secret required to enroll a new agent
+	AdminUser    string
+	AdminPass    string // bootstrap admin password (bcrypt-hashed at startup)
+	TLSCert      string // path to server TLS cert (enables HTTPS)
+	TLSKey       string // path to server TLS key
+	TLSClientCA  string // path to CA that signs agent client certs (enables mTLS)
+	BehindProxy  bool   // TLS terminated by an upstream proxy (skips the prod TLS-required gate)
+	RulesDir     string // directory of Sigma-style YAML rules
+	IOCDir       string // directory of threat-intel IOC feed files (hash/ip/domain)
+	AlertWebhook string // webhook URL for detection alerts ("" disables)
+	AlertKind    string // slack | discord | generic
+	AlertMinSev  string // minimum severity to alert (default high)
+	// Email (SMTP) alert sink — enabled when host+from+to are all set.
+	SMTPHost       string
+	SMTPPort       string
+	SMTPUser       string
+	SMTPPass       string
+	AlertMailFrom  string
+	AlertMailTo    string // comma-separated
+	SMTPTLS        string // starttls (default) | implicit | none
 	WebDir         string // optional external dir for the built console (else embedded)
 	Correlate      bool   // worker also runs behavioral correlation
 	AllowOrigins   []string
@@ -41,28 +49,35 @@ type Config struct {
 // Load reads configuration from the environment with sensible, secure defaults.
 func Load() *Config {
 	c := &Config{
-		Env:          env("SENTINEL_ENV", "development"),
-		Role:         env("SENTINEL_ROLE", "all"),
-		HTTPAddr:     env("SENTINEL_HTTP_ADDR", ":8080"),
-		DatabaseURL:  env("SENTINEL_DATABASE_URL", "postgres://sentinel:sentinel@localhost:5432/sentinel?sslmode=disable"),
-		NatsURL:      env("SENTINEL_NATS_URL", ""),
-		RedisURL:     env("SENTINEL_REDIS_URL", ""),
-		JWTSecret:    env("SENTINEL_JWT_SECRET", ""),
-		EnrollToken:  env("SENTINEL_ENROLL_TOKEN", ""),
-		AdminUser:    env("SENTINEL_ADMIN_USER", "admin"),
-		AdminPass:    env("SENTINEL_ADMIN_PASS", ""),
-		TLSCert:      env("SENTINEL_TLS_CERT", ""),
-		TLSKey:       env("SENTINEL_TLS_KEY", ""),
-		TLSClientCA:  env("SENTINEL_TLS_CLIENT_CA", ""),
-		RulesDir:     env("SENTINEL_RULES_DIR", "rules"),
-		IOCDir:       env("SENTINEL_IOC_DIR", "intel/feeds"),
-		AlertWebhook: env("SENTINEL_ALERT_WEBHOOK", ""),
-		AlertKind:    env("SENTINEL_ALERT_KIND", "generic"),
-		AlertMinSev:  env("SENTINEL_ALERT_MIN_SEVERITY", "high"),
-		WebDir:       env("SENTINEL_WEB_DIR", ""),
-		Correlate:    env("SENTINEL_CORRELATE", "true") != "false",
-		BehindProxy:  env("SENTINEL_BEHIND_PROXY", "") == "true",
-		MetricsToken: env("SENTINEL_METRICS_TOKEN", ""),
+		Env:           env("SENTINEL_ENV", "development"),
+		Role:          env("SENTINEL_ROLE", "all"),
+		HTTPAddr:      env("SENTINEL_HTTP_ADDR", ":8080"),
+		DatabaseURL:   env("SENTINEL_DATABASE_URL", "postgres://sentinel:sentinel@localhost:5432/sentinel?sslmode=disable"),
+		NatsURL:       env("SENTINEL_NATS_URL", ""),
+		RedisURL:      env("SENTINEL_REDIS_URL", ""),
+		JWTSecret:     env("SENTINEL_JWT_SECRET", ""),
+		EnrollToken:   env("SENTINEL_ENROLL_TOKEN", ""),
+		AdminUser:     env("SENTINEL_ADMIN_USER", "admin"),
+		AdminPass:     env("SENTINEL_ADMIN_PASS", ""),
+		TLSCert:       env("SENTINEL_TLS_CERT", ""),
+		TLSKey:        env("SENTINEL_TLS_KEY", ""),
+		TLSClientCA:   env("SENTINEL_TLS_CLIENT_CA", ""),
+		RulesDir:      env("SENTINEL_RULES_DIR", "rules"),
+		IOCDir:        env("SENTINEL_IOC_DIR", "intel/feeds"),
+		AlertWebhook:  env("SENTINEL_ALERT_WEBHOOK", ""),
+		AlertKind:     env("SENTINEL_ALERT_KIND", "generic"),
+		AlertMinSev:   env("SENTINEL_ALERT_MIN_SEVERITY", "high"),
+		SMTPHost:      env("SENTINEL_SMTP_HOST", ""),
+		SMTPPort:      env("SENTINEL_SMTP_PORT", "587"),
+		SMTPUser:      env("SENTINEL_SMTP_USER", ""),
+		SMTPPass:      env("SENTINEL_SMTP_PASS", ""),
+		AlertMailFrom: env("SENTINEL_ALERT_MAIL_FROM", ""),
+		AlertMailTo:   env("SENTINEL_ALERT_MAIL_TO", ""),
+		SMTPTLS:       env("SENTINEL_SMTP_TLS", "starttls"),
+		WebDir:        env("SENTINEL_WEB_DIR", ""),
+		Correlate:     env("SENTINEL_CORRELATE", "true") != "false",
+		BehindProxy:   env("SENTINEL_BEHIND_PROXY", "") == "true",
+		MetricsToken:  env("SENTINEL_METRICS_TOKEN", ""),
 	}
 	if o := env("SENTINEL_ALLOW_ORIGINS", ""); o != "" {
 		c.AllowOrigins = strings.Split(o, ",")

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,16 +13,15 @@ import (
 	"github.com/sentinel/server/internal/model"
 )
 
-func TestDisabledWhenNoURL(t *testing.T) {
-	if New("", KindGeneric, "high", slog.Default()) != nil {
-		t.Fatal("empty URL must return nil notifier")
+func TestDisabledWhenNoSink(t *testing.T) {
+	if New(Config{MinSeverity: "high"}, slog.Default()) != nil {
+		t.Fatal("no webhook + no smtp must return nil notifier")
 	}
-	// nil.Notify must be a safe no-op
 	var n *Notifier
-	n.Notify(&model.Detection{Severity: model.SevCritical})
+	n.Notify(&model.Detection{Severity: model.SevCritical}) // nil-safe no-op
 }
 
-func recvServer(t *testing.T, hits *int32, last *string) *httptest.Server {
+func recvServer(hits *int32, last *string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		*last = string(b)
@@ -30,56 +30,71 @@ func recvServer(t *testing.T, hits *int32, last *string) *httptest.Server {
 	}))
 }
 
-func TestSeverityGate(t *testing.T) {
+func TestSeverityGateAndThrottle(t *testing.T) {
 	var hits int32
 	var body string
-	srv := recvServer(t, &hits, &body)
+	srv := recvServer(&hits, &body)
 	defer srv.Close()
-	n := New(srv.URL, KindSlack, "high", slog.Default())
-	n.Notify(&model.Detection{RuleID: "r1", Severity: model.SevLow}) // below gate → dropped
-	n.Notify(&model.Detection{RuleID: "r2", Severity: model.SevCritical, RuleName: "X", Hostname: "h"})
-	time.Sleep(300 * time.Millisecond)
-	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Fatalf("expected 1 delivery (only critical), got %d", got)
-	}
-}
-
-func TestThrottle(t *testing.T) {
-	var hits int32
-	var body string
-	srv := recvServer(t, &hits, &body)
-	defer srv.Close()
-	n := New(srv.URL, KindGeneric, "high", slog.Default())
+	n := New(Config{MinSeverity: "high", WebhookURL: srv.URL, WebhookKind: KindSlack}, slog.Default())
+	n.Notify(&model.Detection{RuleID: "r", Severity: model.SevLow}) // below gate
 	for i := 0; i < 4; i++ {
-		n.Notify(&model.Detection{RuleID: "same", AgentID: "a", Severity: model.SevHigh})
+		n.Notify(&model.Detection{RuleID: "same", AgentID: "a", Severity: model.SevCritical, RuleName: "X", Hostname: "h"})
 	}
 	time.Sleep(300 * time.Millisecond)
 	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Fatalf("throttle: same rule+host should deliver once, got %d", got)
+		t.Fatalf("expected 1 delivery (gate+throttle), got %d", got)
 	}
 }
 
-func TestPayloadShapes(t *testing.T) {
-	d := &model.Detection{RuleID: "r", RuleName: "Test", Severity: model.SevCritical, Hostname: "h", Summary: "s"}
-	if b := (&Notifier{kind: KindSlack}).payload(d); !contains(b, "text") {
+func TestDiscordEmbedShape(t *testing.T) {
+	d := &model.Detection{RuleID: "r", RuleName: "Reverse shell", Severity: model.SevCritical,
+		Hostname: "h1", User: "root", Tactic: "Execution", MITRE: []string{"T1059"}, Engine: "sigma", Summary: "s"}
+	b := (&webhookSink{kind: KindDiscord}).payload(d)
+	s := string(b)
+	for _, want := range []string{`"embeds"`, `"color":14100029`, `"title"`, `CRITICAL — Reverse shell`, `"fields"`, "T1059"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("discord embed missing %q in %s", want, s)
+		}
+	}
+}
+
+func TestSlackAndGenericShapes(t *testing.T) {
+	d := &model.Detection{RuleID: "r", RuleName: "T", Severity: model.SevHigh, Hostname: "h", Summary: "s"}
+	if !strings.Contains(string((&webhookSink{kind: KindSlack}).payload(d)), `"text"`) {
 		t.Fatal("slack payload missing text")
 	}
-	if b := (&Notifier{kind: KindDiscord}).payload(d); !contains(b, "content") {
-		t.Fatal("discord payload missing content")
-	}
-	if b := (&Notifier{kind: KindGeneric}).payload(d); !contains(b, "rule_id") {
+	if !strings.Contains(string((&webhookSink{kind: KindGeneric}).payload(d)), `"rule_id"`) {
 		t.Fatal("generic payload missing rule_id")
 	}
 }
 
-func contains(b []byte, s string) bool {
-	return len(b) > 0 && (string(b) != "" && (indexOf(string(b), s) >= 0))
-}
-func indexOf(h, n string) int {
-	for i := 0; i+len(n) <= len(h); i++ {
-		if h[i:i+len(n)] == n {
-			return i
+func TestEmailMessageWellFormedAndInjectionSafe(t *testing.T) {
+	e := &emailSink{from: "soc@x.tld", to: []string{"a@x.tld", "b@x.tld"}}
+	d := &model.Detection{
+		RuleName: "evil\r\nBcc: attacker@evil.tld", // header-injection attempt via rule name
+		Severity: model.SevCritical, Hostname: "h\r\nX-Inject: 1", User: "root", Summary: "body",
+		TS: time.Now(),
+	}
+	msg := string(e.message(d))
+	// headers present
+	for _, h := range []string{"From: soc@x.tld", "To: a@x.tld, b@x.tld", "Subject: [Sentinel CRITICAL]", "Content-Type: text/plain"} {
+		if !strings.Contains(msg, h) {
+			t.Fatalf("email missing header %q", h)
 		}
 	}
-	return -1
+	// the CRLF-injected Bcc/X-Inject must NOT appear as a real header line
+	if strings.Contains(msg, "\r\nBcc:") || strings.Contains(msg, "\r\nX-Inject:") {
+		t.Fatalf("SMTP header injection not neutralized:\n%s", msg)
+	}
+}
+
+func TestEmailSinkEnabledNeedsAllFields(t *testing.T) {
+	// host without from/to → no email sink (so New returns nil if also no webhook)
+	if New(Config{MinSeverity: "high", SMTPHost: "smtp.x.tld"}, slog.Default()) != nil {
+		t.Fatal("incomplete SMTP config should not enable email sink")
+	}
+	n := New(Config{MinSeverity: "high", SMTPHost: "smtp.x.tld", MailFrom: "a@x.tld", MailTo: "b@x.tld"}, slog.Default())
+	if n == nil || len(n.Sinks()) != 1 || n.Sinks()[0] != "email" {
+		t.Fatalf("email sink not enabled: %v", n.Sinks())
+	}
 }

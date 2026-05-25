@@ -56,6 +56,22 @@ kernel-only pieces (eBPF-LSM) are isolated so the rest ships without a kernel te
   `self_update` command (download verified binary + systemd restart).
 - Mesh soak: load-gen script for N agents (documented; not run against prod).
 
+## STATUS (2026-05-25)
+- **W1 deploy — DONE + LIVE.** New agent built on app2 (real linux, EXIT=0), published to
+  /dl with SHA-256, reinstalled on mbovh1 (checksum-verified), restarted. Verified in DB:
+  lineage (systemd→sshd→sh→sleep), uid/user (mb_dev/1003, postgres/70, root), posture,
+  kmod, kernel_tainted. Rootkit hidden-PID **race FP fixed** (two-pass confirm).
+- **W2 IOC — DONE.** internal/intel, wired to pipeline, sample feed, unit-tested.
+- **W3 rootkit+posture — DONE + LIVE.** firing on mbovh1, no false criticals.
+- **W4/W7 enforcement — PARTIAL.** cgroup kill_tree + freeze/unfreeze DONE; agent
+  self-protection DONE+LIVE (oom_score_adj=-1000 verified). fanotify exec-block +
+  eBPF-LSM bprm_check = documented next tier (needs kernel module project).
+- **W5 forensics — PARTIAL.** quarantine_file + live_triage DONE; console incident
+  timeline / process-tree UI + console→agent policy push = TODO (frontend/API).
+- **W6 scale — PARTIAL.** hierarchical events_daily cagg + retention tiers DONE; agent
+  auto-update channel + 700-agent mesh soak = TODO.
+- uid/user fix: refresh_processes_specifics with user UpdateKind (was empty).
+
 ## Sequence
 W1 (deploy) → W2 (IOC) → W3 (posture/rootkit) → W6 (caggs/retention) → W4 (enforcement) →
 W5 (forensics + console timeline) → eBPF-LSM (documented module).

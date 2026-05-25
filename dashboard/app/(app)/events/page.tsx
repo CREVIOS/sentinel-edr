@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sev, Chip } from "@/components/severity";
 import { InfoSheet, type Field } from "@/components/info-sheet";
 import { Inspect } from "@/components/inspect";
+import { LineageTree } from "@/components/lineage-tree";
 import { useLiveList, useDebounced } from "@/lib/use-data";
 import { bytes, detail, shortTime } from "@/lib/format";
 import type { Event } from "@/lib/types";
@@ -28,7 +29,7 @@ function eventFields(e: Event): Field[] {
   if (e.process) f.push(
     { label: "Process", value: `${e.process.name} (pid ${e.process.pid})`, mono: true },
     { label: "User", value: e.process.user ? `${e.process.user} (uid ${e.process.uid ?? 0})` : undefined, mono: true },
-    { label: "Lineage", value: e.process.lineage || e.process.parent, mono: true, wrap: true },
+    { label: "Lineage", value: <LineageTree lineage={e.process.lineage || e.process.parent} />, wrap: true },
     { label: "Container", value: e.process.container, mono: true },
     { label: "Command", value: e.process.cmdline, mono: true, wrap: true },
   );

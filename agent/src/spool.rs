@@ -25,6 +25,9 @@ const MIN_FREE_BYTES: u64 = 512 * 1024 * 1024; // never let free space drop belo
 pub struct Spool {
     dir: PathBuf,
     cipher: Aes256Gcm,
+    /// count of batches evicted under pressure since boot — the honest "data was shed" signal
+    /// (only low-priority 'b' batches are ever dropped; criticals are kept).
+    dropped: std::sync::atomic::AtomicU64,
 }
 
 /// Snapshot of spool state for telemetry/heartbeat.
@@ -33,6 +36,7 @@ pub struct SpoolStats {
     pub files: usize,
     pub bytes: u64,
     pub oldest_age_secs: i64,
+    pub dropped: u64,
 }
 
 impl Spool {
@@ -48,6 +52,7 @@ impl Spool {
         Ok(Spool {
             dir,
             cipher: Aes256Gcm::new(key),
+            dropped: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -104,7 +109,10 @@ impl Spool {
                 .or_else(|| files.first());
             match victim {
                 Some(p) => {
-                    let _ = std::fs::remove_file(p);
+                    if std::fs::remove_file(p).is_ok() {
+                        self.dropped
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
                 }
                 None => return,
             }
@@ -170,6 +178,7 @@ impl Spool {
             files: files.len(),
             bytes,
             oldest_age_secs,
+            dropped: self.dropped.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 

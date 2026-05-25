@@ -318,6 +318,10 @@ fn heartbeat(tick: u64, spool: &Spool) -> event::Event {
         "spool_oldest_age_secs".into(),
         serde_json::Value::from(s.oldest_age_secs),
     );
+    // count of telemetry batches shed under offline pressure (>0 ⇒ some low-priority data was
+    // lost on this host; criticals are never dropped). The honest data-loss signal.
+    ev.extra
+        .insert("spool_dropped".into(), serde_json::Value::from(s.dropped));
     ev
 }
 

@@ -7,6 +7,7 @@
 //!   * upload batched events; spool encrypted to disk and replay when offline
 //!   * maintain a command channel and execute containment actions
 
+mod bpf;
 mod collectors;
 mod config;
 mod dlp;
@@ -124,8 +125,10 @@ async fn main() -> Result<()> {
     // supports it and we were built with --features ebpf. Drained into each batch below; the
     // polling collectors still run, so a load failure degrades gracefully.
     #[cfg(feature = "ebpf")]
-    let ebpf_sink: Option<ebpf::loader::Sink> = if tier == ebpf::Tier::Ebpf {
-        match ebpf::loader::load_and_run().await {
+    let ebpf_sink: Option<bpf::Sink> = if tier == ebpf::Tier::Ebpf {
+        // AllowInit: deny kill/ptrace of the agent from anyone except init(systemd) + the agent
+        // itself, so the host stays manageable while a normal root shell cannot kill it.
+        match bpf::load_and_run(bpf::Enforce::AllowInit) {
             Ok(s) => Some(s),
             Err(e) => {
                 warn!(error = %e, "eBPF load failed; continuing on the polling tier");

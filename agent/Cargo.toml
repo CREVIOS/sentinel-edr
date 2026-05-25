@@ -40,17 +40,17 @@ dns-lookup = "3"
 # runtime (libpcap0.8) + CAP_NET_RAW; the sniffer fails closed to rDNS if either is missing.
 pcap = "2"
 
-# eBPF userspace loader — only pulled in with `--features ebpf` (needs aya + a CO-RE/BTF
-# kernel). The default build ships the polling collectors with zero eBPF deps.
-aya = { version = "0.13", optional = true }
-aya-log = { version = "0.2", optional = true }
-bytes = { version = "1", optional = true }
+# eBPF userspace loader — only pulled in with `--features ebpf`. libbpf-rs (vendored libbpf)
+# loads the C/CO-RE object (agent/bpf/sentinel.bpf.o) at runtime: telemetry tracepoint + LSM
+# tamper-protection hooks. CO-RE makes one object run on every dev-PC kernel. Needs a runtime
+# kernel with BTF + CAP_BPF/CAP_SYS_ADMIN (+ lsm=bpf at boot for the LSM enforcement hooks).
+libbpf-rs = { version = "0.24", features = ["vendored"], optional = true }
 
 [features]
 default = []
-# Build the in-kernel eBPF telemetry path. Requires: nightly + bpf-linker to build the
-# kernel object (see sentinel-ebpf/), and a runtime kernel with BTF + CAP_BPF/CAP_SYS_ADMIN.
-ebpf = ["dep:aya", "dep:aya-log", "dep:bytes"]
+# Build the in-kernel eBPF path (telemetry + LSM tamper protection). Build deps: clang, libelf,
+# zlib, pkg-config (vendored libbpf). Runtime: BTF kernel; lsm=bpf for enforcement.
+ebpf = ["dep:libbpf-rs"]
 
 [profile.release]
 opt-level = 3

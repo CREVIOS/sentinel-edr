@@ -82,7 +82,9 @@ impl Responder {
             "unisolate" => self.unisolate(),
             "disable_account" => self.disable_account(cmd),
             "block_upload" => self.block_upload(),
+            "unblock_upload" => self.unblock_upload(),
             "block_usb" => self.block_usb(),
+            "unblock_usb" => self.unblock_usb(),
             "kill_tree" => self.kill_tree(cmd),
             "freeze" => self.freeze(cmd, true),
             "unfreeze" => self.freeze(cmd, false),
@@ -575,6 +577,27 @@ impl Responder {
         }
     }
 
+    // -------- lift the upload block --------
+    fn unblock_upload(&self) -> Result<String, String> {
+        #[cfg(target_os = "linux")]
+        {
+            // delete only OUR DLP table; never touch the host's global ruleset
+            let _ = nft(&["delete", "table", "inet", "sentinel_dlp"]); // ok if already absent
+                                                                       // Only clear the flag once the table is verifiably gone, so telemetry can't
+                                                                       // claim egress is restored while traffic is still dropped.
+            if verify_nft_table("sentinel_dlp").is_ok() {
+                return Err("failed to remove upload-block table (still present)".into());
+            }
+            self.flags.upload_blocked.store(false, Ordering::SeqCst);
+            Ok("outbound upload block lifted".into())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.flags.upload_blocked.store(false, Ordering::SeqCst);
+            Ok("upload-block flag cleared".into())
+        }
+    }
+
     // -------- block USB mass storage --------
     fn block_usb(&self) -> Result<String, String> {
         if !self.enforce() {
@@ -607,6 +630,39 @@ impl Responder {
         {
             // Do NOT set the flag — nothing is actually blocked on this platform.
             Err("USB enforcement requires Linux (USBGuard/modprobe)".into())
+        }
+    }
+
+    // -------- lift the USB block --------
+    fn unblock_usb(&self) -> Result<String, String> {
+        #[cfg(target_os = "linux")]
+        {
+            // Mirror block_usb: if USBGuard drove the block, relax its implicit policy; otherwise
+            // reload the mass-storage modules we unloaded.
+            if which("usbguard") {
+                let out = Command::new("usbguard")
+                    .args(["set-parameter", "ImplicitPolicyTarget", "allow"])
+                    .output();
+                if let Ok(o) = out {
+                    if o.status.success() {
+                        self.flags.usb_blocked.store(false, Ordering::SeqCst);
+                        return Ok("USBGuard implicit policy set to allow".into());
+                    }
+                }
+            }
+            for module in ["usb_storage", "uas"] {
+                let _ = Command::new("modprobe").arg(module).output();
+            }
+            if !module_loaded("usb_storage") {
+                return Err("failed to reload usb_storage module".into());
+            }
+            self.flags.usb_blocked.store(false, Ordering::SeqCst);
+            Ok("USB mass-storage modules reloaded; removable media allowed".into())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.flags.usb_blocked.store(false, Ordering::SeqCst);
+            Ok("usb-block flag cleared".into())
         }
     }
 

@@ -11,7 +11,8 @@ import { Crosshair, Bot, CheckCircle2, XCircle } from "lucide-react";
 
 const LABEL: Record<string, string> = {
   kill_process: "Kill Process", isolate: "Isolate Endpoint", unisolate: "Lift Isolation",
-  disable_account: "Disable Account", block_upload: "Block Upload", block_usb: "Block USB",
+  disable_account: "Disable Account", block_upload: "Block Upload", unblock_upload: "Lift Upload Block",
+  block_usb: "Block USB", unblock_usb: "Lift USB Block",
 };
 
 function statusColor(s: string) {

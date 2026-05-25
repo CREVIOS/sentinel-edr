@@ -1106,7 +1106,8 @@ func (s *Server) webFS() fs.FS {
 func validResponseType(t string) bool {
 	switch model.ResponseType(t) {
 	case model.RespKillProcess, model.RespKillTree, model.RespIsolate, model.RespUnisolate,
-		model.RespDisableAccount, model.RespBlockUpload, model.RespBlockUSB,
+		model.RespDisableAccount, model.RespBlockUpload, model.RespUnblockUpload,
+		model.RespBlockUSB, model.RespUnblockUSB,
 		model.RespFreeze, model.RespUnfreeze, model.RespQuarantine, model.RespLiveTriage,
 		model.RespUpdatePolicy, model.RespSelfUpdate:
 		return true

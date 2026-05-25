@@ -72,7 +72,9 @@ export default function EndpointsPage() {
                   ? <DropdownMenuItem variant="destructive" onClick={() => setPending({ a, type: "isolate", label: "Isolate", destructive: true, desc: `Cut all network traffic from ${a.hostname} except the management server. Active sessions and tooling on the host will lose connectivity until isolation is lifted.` })}><ShieldOff className="size-4" /> Isolate endpoint</DropdownMenuItem>
                   : <DropdownMenuItem onClick={() => setPending({ a, type: "unisolate", label: "Lift isolation", desc: `Restore normal network connectivity for ${a.hostname}.` })}><ShieldCheck className="size-4" /> Lift isolation</DropdownMenuItem>}
                 <DropdownMenuItem onClick={() => setPending({ a, type: "block_usb", label: "Block USB", desc: `Block USB mass-storage on ${a.hostname}. New removable media will be rejected.` })}><Usb className="size-4" /> Block USB</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPending({ a, type: "unblock_usb", label: "Lift USB block", desc: `Re-enable USB mass-storage on ${a.hostname}.` })}><Usb className="size-4" /> Lift USB block</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setPending({ a, type: "block_upload", label: "Block uploads", desc: `Drop new outbound upload channels (web/ftp/nfs) on ${a.hostname}.` })}><CloudOff className="size-4" /> Block uploads</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setPending({ a, type: "unblock_upload", label: "Lift upload block", desc: `Restore outbound upload channels on ${a.hostname}.` })}><CloudOff className="size-4" /> Lift upload block</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -107,7 +109,9 @@ export default function EndpointsPage() {
               ? <Button size="sm" variant="destructive" onClick={() => setPending({ a: sel, type: "isolate", label: "Isolate", destructive: true, desc: `Cut all network traffic from ${sel.hostname} except the management server.` })}><ShieldOff className="size-4" /> Isolate</Button>
               : <Button size="sm" onClick={() => setPending({ a: sel, type: "unisolate", label: "Lift isolation", desc: `Restore connectivity for ${sel.hostname}.` })}><ShieldCheck className="size-4" /> Lift isolation</Button>}
             <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "block_usb", label: "Block USB", desc: `Block USB mass-storage on ${sel.hostname}.` })}><Usb className="size-4" /> Block USB</Button>
+            <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "unblock_usb", label: "Lift USB block", desc: `Re-enable USB mass-storage on ${sel.hostname}.` })}><Usb className="size-4" /> Lift USB block</Button>
             <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "block_upload", label: "Block uploads", desc: `Block outbound uploads on ${sel.hostname}.` })}><CloudOff className="size-4" /> Block uploads</Button>
+            <Button size="sm" variant="outline" onClick={() => setPending({ a: sel, type: "unblock_upload", label: "Lift upload block", desc: `Restore outbound upload channels on ${sel.hostname}.` })}><CloudOff className="size-4" /> Lift upload block</Button>
           </div>
         )}
         {sel && (

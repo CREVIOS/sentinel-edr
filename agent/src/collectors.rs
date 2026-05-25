@@ -15,7 +15,7 @@ use std::process::Command;
 
 use regex::Regex;
 use sha2::{Digest, Sha256};
-use sysinfo::{Pid, ProcessesToUpdate, System, Users};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind, Users};
 use walkdir::WalkDir;
 
 use crate::dlp;
@@ -73,7 +73,16 @@ impl ProcessCollector {
     }
 
     pub fn poll(&mut self) -> Vec<Event> {
-        self.sys.refresh_processes(ProcessesToUpdate::All, true);
+        // Refresh WITH user info — sysinfo's default refresh kind omits user_id, which left
+        // process.uid/user empty. Request it explicitly so user-scoped detections work.
+        self.sys.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::new()
+                .with_cmd(UpdateKind::Always)
+                .with_exe(UpdateKind::Always)
+                .with_user(UpdateKind::Always),
+        );
         // Refresh the uid->name table occasionally so new accounts resolve (cheap; not every poll).
         self.ticks = self.ticks.wrapping_add(1);
         if self.ticks % 30 == 0 {

@@ -11,6 +11,7 @@ mod collectors;
 mod config;
 mod dlp;
 mod dnscache;
+mod dnssniff;
 mod ebpf;
 mod event;
 mod respond;
@@ -114,6 +115,10 @@ async fn main() -> Result<()> {
     // is filled from observed DNS responses; otherwise best-effort forward-confirmed reverse DNS
     // enriches it. (eBPF DNS-fill flips rDNS off once wired.)
     let dns = dnscache::DnsCache::new(tier != ebpf::Tier::Ebpf);
+    // Authoritative forward-DNS attribution: sniff UDP/53 answers so connections show the real
+    // domain the host queried, not the remote IP's hosting-provider PTR. Falls back to the rDNS
+    // path above if libpcap/CAP_NET_RAW are unavailable.
+    dnssniff::spawn(dns.clone());
 
     // --- collectors ---
     let mut proc_c = collectors::ProcessCollector::new();

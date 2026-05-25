@@ -138,6 +138,8 @@ pub fn load_and_run(enforce: Enforce) -> anyhow::Result<Sink> {
     std::thread::Builder::new()
         .name("bpf-ringbuf".into())
         .spawn(move || loop {
+            // poll blocks up to the timeout; the registered callback drains exec events into the
+            // shared sink, which the agent loop folds into each batch.
             let _ = rb.poll(Duration::from_millis(250));
         })
         .ok();

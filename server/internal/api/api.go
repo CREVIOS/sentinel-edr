@@ -515,9 +515,9 @@ func (s *Server) createSuppression(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Field {
-	case "host", "user", "agent", "summary", "rule":
+	case "host", "user", "agent", "summary":
 	default:
-		http.Error(w, "field must be host|user|agent|summary|rule", http.StatusBadRequest)
+		http.Error(w, "field must be host|user|agent|summary", http.StatusBadRequest)
 		return
 	}
 	if req.Op == "" {

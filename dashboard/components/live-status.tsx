@@ -9,12 +9,16 @@ export function LiveStatus() {
   const live = useStreamStatus();
   const [now, setNow] = useState("");
   useEffect(() => {
+    setNow(new Date().toISOString().slice(11, 19));
     const t = setInterval(() => setNow(new Date().toISOString().slice(11, 19)), 1000);
     return () => clearInterval(t);
   }, []);
   return (
     <div className="flex items-center gap-3">
       <span
+        role="status"
+        aria-live="polite"
+        aria-label={live ? "Live: connected to the control plane" : "Reconnecting to the control plane"}
         className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-wider transition-colors ${
           live
             ? "border-[color-mix(in_oklch,var(--signal)_45%,transparent)] text-[var(--signal)]"
@@ -26,7 +30,7 @@ export function LiveStatus() {
         ) : (
           <span className="size-2 rounded-full bg-[var(--sev-info)]" />
         )}
-        {live ? "Watching" : "Offline"}
+        {live ? "Live" : "Reconnecting"}
       </span>
       <span className="hidden items-center gap-1.5 font-mono text-xs text-muted-foreground sm:inline-flex">
         <Eye className="size-3.5 opacity-70" />

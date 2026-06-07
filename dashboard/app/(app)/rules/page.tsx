@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { type ColumnDef } from "@tanstack/react-table";
 import { Sev, Chip } from "@/components/severity";
+import { MitreChips } from "@/components/mitre";
 import { Metric } from "@/components/metric";
 import { DataTable, SortHeader } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import type { Rule, Suppression } from "@/lib/types";
 import { ScrollText, Crosshair, Bot, BellOff, Trash2, Plus } from "lucide-react";
 
 const FIELDS = ["host", "user", "agent", "summary", "rule"];
+const RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
 export default function RulesPage() {
   const [bump, setBump] = useState(0);
@@ -42,19 +44,26 @@ export default function RulesPage() {
     if (res.ok) { toast.success("Suppression removed"); reload(); }
     else toast.error(`Failed (${res.status})`);
   }
+  async function bulkToggle(rows: Rule[], enabled: boolean, clear: () => void) {
+    const res = await Promise.all(rows.map((r) => post(`rules/${r.ID}/toggle`, { enabled })));
+    const ok = res.filter((x) => x.ok).length;
+    if (ok === rows.length) toast.success(`${ok} rule${ok === 1 ? "" : "s"} ${enabled ? "enabled" : "disabled"}`);
+    else toast.error(res.some((x) => x.status === 403) ? "Admin role required" : `${ok}/${rows.length} updated`);
+    clear(); reload();
+  }
 
   const columns: ColumnDef<Rule>[] = useMemo(() => [
-    { accessorKey: "Severity", header: ({ column }) => <SortHeader column={column} title="Sev" />, cell: ({ row }) => <Sev s={row.original.Severity} /> },
+    { accessorKey: "Severity", header: ({ column }) => <SortHeader column={column} title="Sev" />, cell: ({ row }) => <Sev s={row.original.Severity} />, sortingFn: (a, b) => (RANK[a.original.Severity] ?? 99) - (RANK[b.original.Severity] ?? 99) },
     { accessorKey: "Title", header: ({ column }) => <SortHeader column={column} title="Rule" />, cell: ({ row }) => <div><div className="font-mono">{row.original.Title}</div><div className="text-xs text-muted-foreground">{row.original.ID}</div></div> },
     { accessorKey: "Category", header: "Category", cell: ({ row }) => <Chip>{row.original.Category}</Chip> },
     { accessorKey: "Tactic", header: ({ column }) => <SortHeader column={column} title="Tactic" />, cell: ({ row }) => <span className="text-muted-foreground">{row.original.Tactic || "—"}</span> },
-    { id: "mitre", header: "ATT&CK", cell: ({ row }) => <div className="flex flex-wrap gap-1">{(row.original.MITRE || []).map((m) => <Chip key={m} color="var(--chart-1)">{m}</Chip>)}</div> },
+    { id: "mitre", accessorFn: (r) => (r.MITRE || []).join(" "), header: "ATT&CK", cell: ({ row }) => <MitreChips ids={row.original.MITRE || undefined} max={3} /> },
     { accessorKey: "AutoRespond", header: "Auto-Response", cell: ({ row }) => row.original.AutoRespond ? <Chip color="var(--signal)">{row.original.AutoRespond}</Chip> : <span className="text-muted-foreground">—</span> },
     {
       id: "enabled", header: "Enabled", enableHiding: false,
       cell: ({ row }) => (
         <div onClick={(e) => e.stopPropagation()}>
-          <Switch checked={row.original.Enabled} onCheckedChange={(v) => toggle(row.original, v)} />
+          <Switch aria-label={`Enable ${row.original.Title}`} checked={row.original.Enabled} onCheckedChange={(v) => toggle(row.original, v)} />
         </div>
       ),
     },
@@ -62,7 +71,7 @@ export default function RulesPage() {
 
   const suppCols: ColumnDef<Suppression>[] = [
     { accessorKey: "rule_id", header: "Rule", cell: ({ row }) => <span className="font-mono text-xs">{row.original.rule_id === "*" ? "any rule" : row.original.rule_id}</span> },
-    { id: "match", header: "Match", cell: ({ row }) => <span className="font-mono text-xs">{row.original.field} {row.original.op === "contains" ? "⊃" : "="} {row.original.value}</span> },
+    { id: "match", header: "Match", cell: ({ row }) => <span className="font-mono text-xs">{row.original.field} {row.original.op === "contains" ? "contains" : "equals"} {row.original.value}</span> },
     { accessorKey: "hits", header: ({ column }) => <SortHeader column={column} title="Silenced" />, cell: ({ row }) => <span className="font-mono tabular-nums">{row.original.hits || 0}</span> },
     { accessorKey: "reason", header: "Reason", cell: ({ row }) => <span className="text-muted-foreground">{row.original.reason || "—"}</span> },
     { accessorKey: "created_by", header: "By", cell: ({ row }) => <span className="text-muted-foreground">{row.original.created_by || "—"}</span> },
@@ -71,7 +80,7 @@ export default function RulesPage() {
       id: "actions", enableHiding: false,
       cell: ({ row }) => (
         <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" className="size-8" onClick={() => removeSupp(row.original)}><Trash2 className="size-4" /></Button>
+          <Button aria-label="Remove suppression" variant="ghost" size="icon" className="size-8" onClick={() => removeSupp(row.original)}><Trash2 className="size-4" /></Button>
         </div>
       ),
     },
@@ -80,20 +89,29 @@ export default function RulesPage() {
   return (
     <div className="space-y-5">
       <div className="reveal grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Detection Rules" value={all.length} icon={ScrollText} />
-        <Metric label="ATT&CK Tactics" value={tactics} icon={Crosshair} accent="var(--chart-1)" />
-        <Metric label="Auto-Response" value={withResp} icon={Bot} accent="var(--signal)" />
-        <Metric label="Disabled" value={disabled} icon={BellOff} accent="var(--sev-medium)" />
+        <Metric label="Detection rules" value={all.length} icon={ScrollText} />
+        <Metric label="ATT&CK tactics" value={tactics} icon={Crosshair} accent="var(--signal)" />
+        <Metric label="Auto-response" value={withResp} icon={Bot} accent="var(--signal)" />
+        <Metric label="Disabled" value={disabled} icon={BellOff} accent="var(--muted-foreground)" />
       </div>
 
       <DataTable
         columns={columns}
         data={all}
         rowId={(r) => r.ID}
+        tableId="rules"
+        enableSelection
+        bulkActions={(rows, clear) => (
+          <>
+            <Button size="sm" variant="outline" onClick={() => bulkToggle(rows, true, clear)}>Enable selected</Button>
+            <Button size="sm" variant="outline" onClick={() => bulkToggle(rows, false, clear)}>Disable selected</Button>
+          </>
+        )}
         filterPlaceholder="Search rules, tactics, technique IDs…"
         pageSize={25}
         initialSort={[{ id: "Severity", desc: false }]}
-        empty="no rules loaded"
+        loading={rules === undefined}
+        empty="No detection rules loaded yet"
       />
 
       <div>
@@ -110,7 +128,8 @@ export default function RulesPage() {
           rowId={(s) => s.id}
           filterPlaceholder="Filter suppressions…"
           pageSize={10}
-          empty="no suppressions"
+          loading={supps === undefined}
+          empty="No suppressions yet — silence known-benign activity to add one"
         />
       </div>
     </div>

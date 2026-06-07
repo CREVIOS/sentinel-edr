@@ -276,9 +276,7 @@ fn to_net_event(n: &NetEvent, dns: &DnsCache, own_pid: u32) -> Option<Event> {
         return None;
     }
     let ip: IpAddr = if n.family == 2 {
-        IpAddr::V4(Ipv4Addr::new(
-            n.daddr[0], n.daddr[1], n.daddr[2], n.daddr[3],
-        ))
+        IpAddr::V4(Ipv4Addr::new(n.daddr[0], n.daddr[1], n.daddr[2], n.daddr[3]))
     } else {
         let mut b = [0u8; 16];
         b.copy_from_slice(&n.daddr);

@@ -20,6 +20,10 @@ function verdictColor(v?: string) {
   return v === "block" ? "var(--sev-critical)" : v === "alert" ? "var(--sev-high)" : "var(--muted-foreground)";
 }
 
+function cap(s?: string) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 export default function DlpPage() {
   const { data: events } = useData<Event[]>("events?category=dlp&limit=400", 5000, "event");
   const { data: classifiers } = useData<Classifier[]>("dlp/classifiers", 60000);
@@ -70,32 +74,32 @@ export default function DlpPage() {
   return (
     <div className="reveal space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="DLP Incidents" value={dlp.length} icon={FileLock2} />
-        <Metric label="Blocked Transfers" value={blocked} icon={ShieldX} accent="var(--sev-critical)" emphasize={blocked > 0} />
-        <Metric label="Classifiers" value={classifiers?.length ?? 0} icon={ScanText} accent="var(--chart-2)" />
-        <Metric label="Policies" value={policies?.length ?? 0} icon={ScrollText} accent="var(--primary)" />
+        <Metric label="DLP incidents" value={dlp.length} icon={FileLock2} />
+        <Metric label="Blocked transfers" value={blocked} icon={ShieldX} accent="var(--sev-critical)" emphasize={blocked > 0} />
+        <Metric label="Classifiers" value={classifiers?.length ?? 0} icon={ScanText} accent="var(--signal)" />
+        <Metric label="Policies" value={policies?.length ?? 0} icon={ScrollText} accent="var(--signal)" />
       </div>
 
       <Card className="panel overflow-hidden">
-        <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 font-mono text-xs tracking-[0.16em] text-muted-foreground"><span className="live-dot size-1.5" /> DLP INCIDENTS</CardTitle></CardHeader>
+        <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><span className="live-dot size-1.5" /> DLP incidents</CardTitle></CardHeader>
         <CardContent>
           <DataTable columns={cols} data={dlp} rowId={(e) => e.id} onRowClick={(e) => setSel(e)}
             filterPlaceholder="Filter classifier, host, user…" pageSize={15}
-            initialSort={[{ id: "ts", desc: true }]} empty="no DLP incidents" />
+            initialSort={[{ id: "ts", desc: true }]} empty="No DLP incidents" loading={events === undefined} />
         </CardContent>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="panel overflow-hidden">
-          <CardHeader className="pb-3"><CardTitle className="font-mono text-xs tracking-[0.16em] text-muted-foreground">CLASSIFIERS</CardTitle></CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="text-sm font-medium text-muted-foreground">Classifiers</CardTitle></CardHeader>
           <CardContent>
-            <DataTable columns={classCols} data={classifiers || []} rowId={(c) => c.name} empty="no classifiers" />
+            <DataTable columns={classCols} data={classifiers || []} rowId={(c) => c.name} empty="No classifiers" loading={classifiers === undefined} />
           </CardContent>
         </Card>
         <Card className="panel overflow-hidden">
-          <CardHeader className="pb-3"><CardTitle className="font-mono text-xs tracking-[0.16em] text-muted-foreground">ENFORCEMENT POLICIES</CardTitle></CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="text-sm font-medium text-muted-foreground">Enforcement policies</CardTitle></CardHeader>
           <CardContent>
-            <DataTable columns={polCols} data={policies || []} rowId={(p) => p.Classifier + p.Channel} pageSize={10} empty="no policies" />
+            <DataTable columns={polCols} data={policies || []} rowId={(p) => p.Classifier + p.Channel} pageSize={10} empty="No enforcement policies" loading={policies === undefined} />
           </CardContent>
         </Card>
       </div>
@@ -103,7 +107,7 @@ export default function DlpPage() {
       <InfoSheet
         open={!!sel} onOpenChange={(o) => !o && setSel(null)}
         title={sel?.dlp?.classifier || "DLP incident"}
-        sub={sel ? `${sel.dlp?.channel} · ${sel.dlp?.verdict || "audit"}` : ""}
+        sub={sel ? `${cap(sel.dlp?.channel) || "Unknown channel"} · ${cap(sel.dlp?.verdict) || "Audit"}` : ""}
         badge={sel && <Sev s={sel.severity} />}
         fields={sel ? fields(sel) : []}
       />

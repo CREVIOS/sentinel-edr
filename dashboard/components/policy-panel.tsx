@@ -35,7 +35,7 @@ export function PolicyPanel({ agent }: { agent: Agent }) {
   const [enforce, setEnforce] = useState(true);
   const [dlp, setDlp] = useState(true);
   const [paused, setPaused] = useState(false);
-  const [interval, setInterval] = useState("5");
+  const [intervalSec, setIntervalSec] = useState("5");
   const [watch, setWatch] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -46,7 +46,7 @@ export function PolicyPanel({ agent }: { agent: Agent }) {
   const [upBusy, setUpBusy] = useState(false);
 
   async function pushPolicy() {
-    const n = parseInt(interval, 10);
+    const n = parseInt(intervalSec, 10);
     if (!Number.isFinite(n) || n < 1 || n > 3600) {
       toast.error("Interval must be 1–3600 seconds");
       return;
@@ -55,28 +55,39 @@ export function PolicyPanel({ agent }: { agent: Agent }) {
     const dirs = watch.split("\n").map((s) => s.trim()).filter((s) => s.startsWith("/"));
     if (dirs.length) body.watch = dirs;
     setBusy(true);
-    const r = await post(`agents/${agent.id}/policy`, body);
-    setBusy(false);
-    if (r.ok) toast.success(`Policy pushed to ${agent.hostname}`);
-    else toast.error(`Policy push failed (${r.status})`);
+    try {
+      const r = await post(`agents/${agent.id}/policy`, body);
+      if (r.ok) toast.success(`Policy pushed to ${agent.hostname}`);
+      else toast.error(`Policy push failed (${r.status})`);
+    } catch {
+      toast.error("Network error — not saved");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function pushUpdate() {
+    if (!ver.trim()) { toast.error("Enter a target version"); return; }
     if (!/^https:\/\//.test(url)) { toast.error("URL must be https"); return; }
     if (!/^[0-9a-fA-F]{64}$/.test(sha)) { toast.error("SHA-256 must be 64 hex chars"); return; }
     setUpBusy(true);
-    const r = await post(`agents/${agent.id}/upgrade`, { version: ver.trim(), url: url.trim(), sha256: sha.trim(), reason: "upgrade from console" });
-    setUpBusy(false);
-    if (r.ok) {
-      const j = await r.json().catch(() => ({}));
-      toast.success(j?.status === "up-to-date" ? `${agent.hostname} already on ${ver}` : `Update dispatched to ${agent.hostname}`);
-    } else toast.error(`Upgrade failed (${r.status})`);
+    try {
+      const r = await post(`agents/${agent.id}/upgrade`, { version: ver.trim(), url: url.trim(), sha256: sha.trim(), reason: "upgrade from console" });
+      if (r.ok) {
+        const j = await r.json().catch(() => ({}));
+        toast.success(j?.status === "up-to-date" ? `${agent.hostname} already on ${ver}` : `Update dispatched to ${agent.hostname}`);
+      } else toast.error(`Upgrade failed (${r.status})`);
+    } catch {
+      toast.error("Network error — not saved");
+    } finally {
+      setUpBusy(false);
+    }
   }
 
   return (
     <div className="space-y-3">
       <div>
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Collection policy</div>
+        <div className="mb-1 text-sm font-medium text-muted-foreground">Collection policy</div>
         <Row icon={<ShieldCheck className="size-4" />} title="Enforcement" hint="Permit isolate / disable / quarantine / self-update">
           <Switch checked={enforce} onCheckedChange={setEnforce} />
         </Row>
@@ -87,7 +98,7 @@ export function PolicyPanel({ agent }: { agent: Agent }) {
           <Switch checked={paused} onCheckedChange={setPaused} />
         </Row>
         <Row icon={<RefreshCw className="size-4" />} title="Interval" hint="Collection cadence in seconds (1–3600)">
-          <Input value={interval} onChange={(e) => setInterval(e.target.value)} inputMode="numeric" className="h-8 w-20 text-right font-mono" />
+          <Input value={intervalSec} onChange={(e) => setIntervalSec(e.target.value)} inputMode="numeric" className="h-8 w-20 text-right font-mono" />
         </Row>
         <div className="mt-2 space-y-1.5">
           <Label className="text-xs text-muted-foreground">Watch directories — one absolute path per line (blank = leave unchanged)</Label>
@@ -99,7 +110,7 @@ export function PolicyPanel({ agent }: { agent: Agent }) {
       <Separator />
 
       <div>
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Agent update</div>
+        <div className="mb-1 text-sm font-medium text-muted-foreground">Agent update</div>
         <div className="mb-2 text-xs text-muted-foreground">Current: <span className="font-mono">{agent.version || "unknown"}</span></div>
         <div className="grid grid-cols-1 gap-2">
           <Input value={ver} onChange={(e) => setVer(e.target.value)} placeholder="target version e.g. 0.4.0" className="h-8 font-mono text-xs" />

@@ -28,24 +28,29 @@ export function InfoSheet({
   children?: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  const shownFields = fields.filter((f) => f.value !== undefined && f.value !== null && f.value !== "");
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="flex h-dvh w-full flex-col gap-0 p-0 sm:max-w-md">
         <SheetHeader className="shrink-0 border-b pr-12">
-          {sub && <SheetDescription className="font-mono text-[10px] uppercase tracking-[0.2em]">{sub}</SheetDescription>}
-          <SheetTitle className="font-mono text-base leading-snug break-words">{title}</SheetTitle>
+          {sub && <SheetDescription className="text-xs text-muted-foreground">{sub}</SheetDescription>}
+          <SheetTitle className="text-base font-medium leading-snug break-words">{title}</SheetTitle>
           {badge && <div className="pt-1">{badge}</div>}
         </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">
-          <dl className="divide-y">
-            {fields.filter((f) => f.value !== undefined && f.value !== null && f.value !== "").map((f, i) => (
-              <div key={i} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:px-5">
-                <dt className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</dt>
-                <dd className={`min-w-0 ${f.mono ? "font-mono text-xs" : ""} ${f.wrap ? "break-words" : "truncate"}`}>{f.value}</dd>
-              </div>
-            ))}
-          </dl>
+          {shownFields.length === 0 && !children ? (
+            <p className="px-5 py-10 text-center text-sm text-muted-foreground">No details available.</p>
+          ) : (
+            <dl className="divide-y">
+              {shownFields.map((f, i) => (
+                <div key={i} className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm sm:grid-cols-[7.5rem_minmax(0,1fr)] sm:px-5">
+                  <dt className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</dt>
+                  <dd className={`min-w-0 ${f.mono ? "font-mono text-xs" : ""} ${f.wrap ? "break-words" : "truncate"}`}>{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {children && (<><Separator /><div className="p-4 sm:p-5">{children}</div></>)}
         </div>
 

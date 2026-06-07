@@ -33,7 +33,7 @@ export function TwoFactor() {
     setBusy(true);
     const { data, error } = await authClient.twoFactor.enable({ password });
     setBusy(false);
-    if (error) { toast.error(error.message || "Wrong password"); return; }
+    if (error) { toast.error(error.message || "Incorrect password"); return; }
     setUri(data?.totpURI || "");
     setBackup(data?.backupCodes || []);
     setStep("verify");
@@ -54,7 +54,7 @@ export function TwoFactor() {
     setBusy(true);
     const { error } = await authClient.twoFactor.disable({ password });
     setBusy(false);
-    if (error) { toast.error(error.message || "Wrong password"); return; }
+    if (error) { toast.error(error.message || "Incorrect password"); return; }
     toast.success("Two-factor authentication disabled");
     reset(); refetch?.();
   }
@@ -64,12 +64,12 @@ export function TwoFactor() {
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle className="font-mono text-sm tracking-wide">TWO-FACTOR AUTHENTICATION</CardTitle>
-            <CardDescription>Authenticator-app (TOTP) second step at sign-in.</CardDescription>
+            <CardTitle className="text-sm font-medium">Two-factor authentication</CardTitle>
+            <CardDescription>Adds a one-time code from your authenticator app (TOTP) at sign-in.</CardDescription>
           </div>
           {enabled
-            ? <Badge className="gap-1.5 border-transparent bg-[color-mix(in_oklch,var(--chart-2)_18%,transparent)] text-[var(--chart-2)]"><ShieldCheck className="size-3.5" /> Enabled</Badge>
-            : <Badge variant="outline" className="gap-1.5 text-muted-foreground"><ShieldAlert className="size-3.5" /> Disabled</Badge>}
+            ? <Badge className="gap-1.5 border-transparent bg-[color-mix(in_oklch,var(--signal)_18%,transparent)] text-[var(--signal)]"><ShieldCheck className="size-3.5" strokeWidth={1.75} /> Enabled</Badge>
+            : <Badge variant="outline" className="gap-1.5 text-muted-foreground"><ShieldAlert className="size-3.5" strokeWidth={1.75} /> Disabled</Badge>}
         </div>
       </CardHeader>
       <CardContent>
@@ -82,7 +82,7 @@ export function TwoFactor() {
             <Label className="text-xs text-muted-foreground">Confirm password to disable</Label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             <div className="flex gap-2">
-              <Button type="submit" variant="destructive" disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Disable"}</Button>
+              <Button type="submit" variant="destructive" disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : "Disable"}</Button>
               <Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
             </div>
           </form>
@@ -90,14 +90,14 @@ export function TwoFactor() {
 
         {/* disabled → enable */}
         {!enabled && step === "idle" && (
-          <Button onClick={() => setStep("password")}><ShieldCheck className="size-4" /> Enable 2FA</Button>
+          <Button onClick={() => setStep("password")}><ShieldCheck className="size-4" strokeWidth={1.75} /> Enable 2FA</Button>
         )}
         {!enabled && step === "password" && (
           <form onSubmit={startEnable} className="grid max-w-sm gap-3">
             <Label className="text-xs text-muted-foreground">Confirm your password to begin</Label>
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus required />
             <div className="flex gap-2">
-              <Button type="submit" disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Continue"}</Button>
+              <Button type="submit" disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : "Continue"}</Button>
               <Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
             </div>
           </form>
@@ -115,7 +115,7 @@ export function TwoFactor() {
                 <div>
                   <div className="mb-1 flex items-center justify-between">
                     <Label className="text-xs text-muted-foreground">Backup codes (store safely)</Label>
-                    <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={() => { navigator.clipboard.writeText(backup.join("\n")); toast.success("Backup codes copied"); }}><Copy className="size-3.5" /> Copy</Button>
+                    <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={() => { navigator.clipboard.writeText(backup.join("\n")); toast.success("Backup codes copied"); }}><Copy className="size-3.5" strokeWidth={1.75} /> Copy</Button>
                   </div>
                   <div className="grid grid-cols-2 gap-1 rounded-lg border bg-secondary/40 p-3 font-mono text-xs">
                     {backup.map((b) => <span key={b}>{b}</span>)}
@@ -126,7 +126,7 @@ export function TwoFactor() {
                 <Label className="text-xs text-muted-foreground">Enter the 6-digit code to confirm</Label>
                 <Input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" required />
                 <div className="flex gap-2">
-                  <Button type="submit" disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Verify & enable"}</Button>
+                  <Button type="submit" disabled={busy}>{busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : "Verify & enable"}</Button>
                   <Button type="button" variant="ghost" onClick={reset}>Cancel</Button>
                 </div>
               </form>

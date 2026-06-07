@@ -8,7 +8,7 @@ import { SentinelMark } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, ArrowRight, Radar, FileLock2, Crosshair, ShieldCheck, Eye, EyeOff } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, Radar, FileLock2, Crosshair, ShieldCheck, Eye, EyeOff } from "lucide-react";
 
 const FEATURES = [
   { icon: Radar, title: "Endpoint EDR", desc: "Process, file, auth, USB & network telemetry in real time." },
@@ -63,7 +63,7 @@ export default function LoginPage() {
             Linux endpoint security,<br />
             <span className="text-muted-foreground">end to end.</span>
           </h2>
-          <p className="mt-5 font-mono text-xs uppercase tracking-[0.3em] text-muted-foreground">
+          <p className="mt-5 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
             Monitor · Detect · Prevent · Respond
           </p>
           <div className="mt-10 space-y-5">
@@ -99,14 +99,14 @@ export default function LoginPage() {
               <form onSubmit={verify2fa} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="code" className="text-xs text-muted-foreground">Authentication code</Label>
-                  <Input id="code" inputMode="numeric" autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" required />
+                  <Input id="code" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoComplete="one-time-code" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" required />
                 </div>
                 <Button type="submit" className="w-full" disabled={busy}>
                   {busy ? <Loader2 className="size-4 animate-spin" /> : <>Verify <ArrowRight className="size-4" /></>}
                 </Button>
                 {err && <p className="text-sm text-destructive">{err}</p>}
               </form>
-              <button onClick={() => { setTwoFA(false); setCode(""); setErr(""); }} className="mt-4 text-xs text-muted-foreground hover:text-foreground">← back</button>
+              <button onClick={() => { setTwoFA(false); setCode(""); setErr(""); }} className="mt-4 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3.5" /> Back</button>
             </>
           ) : (
             <>
@@ -114,18 +114,17 @@ export default function LoginPage() {
               <p className="mb-7 mt-1.5 text-sm text-muted-foreground">Authenticate to the command console.</p>
               <form onSubmit={submit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-xs text-muted-foreground">Operator email</Label>
+                  <Label htmlFor="email" className="text-xs text-muted-foreground">Email</Label>
                   <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="pw" className="text-xs text-muted-foreground">Passphrase</Label>
+                  <Label htmlFor="pw" className="text-xs text-muted-foreground">Password</Label>
                   <div className="relative">
                     <Input id="pw" type={showPw ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required className="pr-10" />
                     <button
                       type="button"
                       onClick={() => setShowPw((v) => !v)}
-                      tabIndex={-1}
-                      aria-label={showPw ? "Hide passphrase" : "Show passphrase"}
+                      aria-label={showPw ? "Hide password" : "Show password"}
                       className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-muted-foreground transition-colors hover:text-primary"
                     >
                       {showPw ? <EyeOff className="size-4" /> : <Eye className="size-4" />}

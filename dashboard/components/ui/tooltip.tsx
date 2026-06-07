@@ -6,7 +6,9 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 function TooltipProvider({
-  delayDuration = 0,
+  // A short open delay stops tooltips from strobing as the pointer crosses dense table
+  // chrome and icon rows; 0 made every hover flash a tip.
+  delayDuration = 300,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (

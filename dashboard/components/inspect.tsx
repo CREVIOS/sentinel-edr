@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
- * The "watch / inspect" affordance — an eye, fitting for a surveillance console. Used as the
- * row-level detail trigger across tables; on hover it lights up in the primary signal color.
+ * Row-level detail trigger used across the data tables. Renders a ghost icon button;
+ * hover applies the primary accent.
  */
 export function Inspect({
   onClick,
@@ -25,11 +25,11 @@ export function Inspect({
       title={label}
       aria-label={label}
       className={cn(
-        "group/eye text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary",
+        "text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary",
         className,
       )}
     >
-      <Eye className="size-4 transition-transform group-hover/eye:scale-110" />
+      <Eye className="size-4" strokeWidth={1.75} />
     </Button>
   );
 }

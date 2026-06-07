@@ -17,7 +17,7 @@ export function LineageTree({ lineage }: { lineage?: string }) {
         const last = i === nodes.length - 1;
         return (
           <div key={i} className="flex items-center" style={{ paddingLeft: `${i * 14}px` }}>
-            {i > 0 && <CornerDownRight className="mr-1 size-3 shrink-0 text-muted-foreground/60" />}
+            {i > 0 && <CornerDownRight className="mr-1 size-3 shrink-0 text-muted-foreground/60" strokeWidth={1.75} />}
             <span
               className={
                 last

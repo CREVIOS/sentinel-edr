@@ -4,102 +4,105 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
-  Sentinel "Aurora Indigo" theme — a colored (not black) deep-indigo console.
-  Dark by default for SOC use; refined light theme included.
+  Sentinel console theme — a calm, clear security operations surface.
+  Cool slate neutrals (never pure black, never indigo) with a single cyan signal
+  accent, so red/amber severity always reads as the loudest thing on screen.
+  Dark by default for SOC use; a refined light theme is included.
 */
 
 :root {
-  --radius: 0.7rem;
+  --radius: 0.625rem;
 
-  --background: oklch(0.97 0.01 265);
-  --foreground: oklch(0.24 0.03 265);
-  --card: oklch(0.99 0.005 265);
-  --card-foreground: oklch(0.24 0.03 265);
-  --popover: oklch(0.99 0.005 265);
-  --popover-foreground: oklch(0.24 0.03 265);
-  --primary: oklch(0.55 0.2 280);
-  --primary-foreground: oklch(0.99 0.01 280);
-  --secondary: oklch(0.93 0.02 265);
-  --secondary-foreground: oklch(0.3 0.04 265);
-  --muted: oklch(0.94 0.015 265);
-  --muted-foreground: oklch(0.52 0.03 265);
-  --accent: oklch(0.92 0.04 200);
-  --accent-foreground: oklch(0.28 0.04 265);
-  --destructive: oklch(0.58 0.22 18);
-  --border: oklch(0.88 0.02 265);
-  --input: oklch(0.9 0.02 265);
-  --ring: oklch(0.55 0.2 280);
+  --background: oklch(0.985 0.002 250);
+  --foreground: oklch(0.22 0.02 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.02 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.02 250);
+  --primary: oklch(0.48 0.14 205);
+  --primary-foreground: oklch(0.99 0.01 205);
+  --secondary: oklch(0.955 0.004 250);
+  --secondary-foreground: oklch(0.30 0.02 250);
+  --muted: oklch(0.96 0.004 250);
+  --muted-foreground: oklch(0.46 0.02 250);
+  --accent: oklch(0.95 0.02 205);
+  --accent-foreground: oklch(0.30 0.03 215);
+  --destructive: oklch(0.55 0.22 22);
+  --border: oklch(0.91 0.005 250);
+  --input: oklch(0.92 0.005 250);
+  --ring: oklch(0.48 0.14 205);
 
-  --chart-1: oklch(0.62 0.2 285);
-  --chart-2: oklch(0.7 0.13 190);
-  --chart-3: oklch(0.78 0.15 80);
-  --chart-4: oklch(0.65 0.22 15);
-  --chart-5: oklch(0.7 0.13 220);
+  --chart-1: oklch(0.6 0.13 210);
+  --chart-2: oklch(0.7 0.11 175);
+  --chart-3: oklch(0.79 0.14 80);
+  --chart-4: oklch(0.64 0.2 22);
+  --chart-5: oklch(0.62 0.13 248);
 
-  --sidebar: oklch(0.96 0.012 265);
-  --sidebar-foreground: oklch(0.26 0.03 265);
-  --sidebar-primary: oklch(0.55 0.2 280);
-  --sidebar-primary-foreground: oklch(0.99 0.01 280);
-  --sidebar-accent: oklch(0.92 0.03 265);
-  --sidebar-accent-foreground: oklch(0.28 0.04 265);
-  --sidebar-border: oklch(0.88 0.02 265);
-  --sidebar-ring: oklch(0.55 0.2 280);
+  --sidebar: oklch(0.97 0.003 250);
+  --sidebar-foreground: oklch(0.26 0.02 250);
+  --sidebar-primary: oklch(0.48 0.14 205);
+  --sidebar-primary-foreground: oklch(0.99 0.01 205);
+  --sidebar-accent: oklch(0.94 0.012 210);
+  --sidebar-accent-foreground: oklch(0.28 0.03 215);
+  --sidebar-border: oklch(0.91 0.005 250);
+  --sidebar-ring: oklch(0.48 0.14 205);
 
-  --sev-critical: oklch(0.6 0.23 18);
-  --sev-high: oklch(0.72 0.18 55);
-  --sev-medium: oklch(0.82 0.16 90);
-  --sev-low: oklch(0.65 0.16 235);
-  --sev-info: oklch(0.6 0.03 265);
+  --sev-critical: oklch(0.58 0.21 22);
+  --sev-high: oklch(0.68 0.17 50);
+  --sev-medium: oklch(0.78 0.15 85);
+  --sev-low: oklch(0.6 0.13 245);
+  --sev-info: oklch(0.6 0.012 250);
 
-  /* "signal" = live / healthy / online — the command-center accent */
-  --signal: oklch(0.68 0.14 175);
-  --signal-foreground: oklch(0.99 0.01 175);
+  /* "signal" = live / healthy / online — the single command-center accent (cyan).
+     Light value is kept dark enough (L≈0.5) to pass WCAG AA when used as foreground text. */
+  --signal: oklch(0.5 0.12 200);
+  --signal-foreground: oklch(0.99 0.01 200);
 }
 
 .dark {
-  /* deep indigo navy — explicitly NOT black */
-  --background: oklch(0.21 0.035 274);
-  --foreground: oklch(0.95 0.012 265);
-  --card: oklch(0.255 0.04 274);
-  --card-foreground: oklch(0.95 0.012 265);
-  --popover: oklch(0.245 0.04 274);
-  --popover-foreground: oklch(0.95 0.012 265);
-  --primary: oklch(0.72 0.16 285);
-  --primary-foreground: oklch(0.19 0.04 274);
-  --secondary: oklch(0.31 0.04 274);
-  --secondary-foreground: oklch(0.95 0.012 265);
-  --muted: oklch(0.3 0.035 274);
-  --muted-foreground: oklch(0.72 0.03 270);
-  --accent: oklch(0.34 0.05 280);
-  --accent-foreground: oklch(0.96 0.012 265);
-  --destructive: oklch(0.65 0.22 18);
-  --border: oklch(0.98 0 0 / 11%);
-  --input: oklch(0.98 0 0 / 14%);
-  --ring: oklch(0.72 0.16 285);
+  /* deep cool slate — explicitly NOT black, explicitly NOT indigo */
+  --background: oklch(0.18 0.012 250);
+  --foreground: oklch(0.96 0.005 250);
+  --card: oklch(0.215 0.013 250);
+  --card-foreground: oklch(0.96 0.005 250);
+  --popover: oklch(0.205 0.013 250);
+  --popover-foreground: oklch(0.96 0.005 250);
+  --primary: oklch(0.78 0.13 200);
+  --primary-foreground: oklch(0.2 0.03 235);
+  --secondary: oklch(0.27 0.012 250);
+  --secondary-foreground: oklch(0.96 0.005 250);
+  --muted: oklch(0.27 0.012 250);
+  --muted-foreground: oklch(0.71 0.015 250);
+  --accent: oklch(0.3 0.025 215);
+  --accent-foreground: oklch(0.96 0.005 250);
+  --destructive: oklch(0.68 0.2 22);
+  --border: oklch(0.99 0 0 / 10%);
+  --input: oklch(0.99 0 0 / 13%);
+  --ring: oklch(0.78 0.13 200);
 
-  --chart-1: oklch(0.72 0.17 290);
-  --chart-2: oklch(0.74 0.14 188);
-  --chart-3: oklch(0.8 0.15 85);
-  --chart-4: oklch(0.68 0.22 12);
-  --chart-5: oklch(0.72 0.13 225);
+  --chart-1: oklch(0.74 0.13 200);
+  --chart-2: oklch(0.74 0.12 172);
+  --chart-3: oklch(0.81 0.15 82);
+  --chart-4: oklch(0.68 0.2 18);
+  --chart-5: oklch(0.66 0.13 248);
 
-  --sidebar: oklch(0.18 0.035 274);
-  --sidebar-foreground: oklch(0.92 0.012 265);
-  --sidebar-primary: oklch(0.72 0.16 285);
-  --sidebar-primary-foreground: oklch(0.18 0.04 274);
-  --sidebar-accent: oklch(0.29 0.04 280);
-  --sidebar-accent-foreground: oklch(0.96 0.012 265);
-  --sidebar-border: oklch(0.98 0 0 / 9%);
-  --sidebar-ring: oklch(0.72 0.16 285);
+  --sidebar: oklch(0.155 0.012 250);
+  --sidebar-foreground: oklch(0.93 0.005 250);
+  --sidebar-primary: oklch(0.78 0.13 200);
+  --sidebar-primary-foreground: oklch(0.18 0.03 235);
+  --sidebar-accent: oklch(0.27 0.02 215);
+  --sidebar-accent-foreground: oklch(0.96 0.005 250);
+  --sidebar-border: oklch(0.99 0 0 / 9%);
+  --sidebar-ring: oklch(0.78 0.13 200);
 
-  --sev-critical: oklch(0.66 0.23 18);
-  --sev-high: oklch(0.75 0.18 55);
-  --sev-medium: oklch(0.84 0.16 90);
-  --sev-low: oklch(0.68 0.16 235);
-  --sev-info: oklch(0.7 0.03 270);
+  --sev-critical: oklch(0.66 0.21 22);
+  --sev-high: oklch(0.74 0.17 50);
+  --sev-medium: oklch(0.82 0.15 85);
+  --sev-low: oklch(0.7 0.13 245);
+  --sev-info: oklch(0.68 0.012 250);
 
-  --signal: oklch(0.8 0.15 175);
-  --signal-foreground: oklch(0.18 0.04 274);
+  --signal: oklch(0.82 0.13 195);
+  --signal-foreground: oklch(0.18 0.03 235);
 }
 
 @theme inline {
@@ -145,9 +148,9 @@
   --color-sev-info: var(--sev-info);
   --color-signal: var(--signal);
   --color-signal-foreground: var(--signal-foreground);
-  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
-  --font-display: var(--font-bricolage), var(--font-outfit), ui-sans-serif, sans-serif;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+  --font-display: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -156,114 +159,86 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  /* Keyboard focus must never land hidden under the sticky h-14 header (WCAG 2.4.11/2.4.12). */
+  html {
+    scroll-padding-top: 4rem;
+  }
+  /* tabular figures everywhere numbers matter most: data, code, monospace */
+  .font-mono, [class*="tabular"] {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Render code/commands literally — kill Geist Mono ligatures so "--flag" and the space
+     before it never fuse (e.g. `docker run -d --name`, `--cap-add`). */
+  code, kbd, pre, samp, .font-mono {
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0, "dlig" 0;
   }
   ::selection {
-    background: color-mix(in oklch, var(--primary) 32%, transparent);
+    background: color-mix(in oklch, var(--primary) 28%, transparent);
     color: var(--foreground);
   }
   /* slim, themed scrollbars for the console */
   * {
     scrollbar-width: thin;
-    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 20%, transparent) transparent;
   }
   *::-webkit-scrollbar { width: 9px; height: 9px; }
   *::-webkit-scrollbar-thumb {
-    background: color-mix(in oklch, var(--foreground) 18%, transparent);
+    background: color-mix(in oklch, var(--foreground) 16%, transparent);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in oklch, var(--foreground) 32%, transparent);
+    background: color-mix(in oklch, var(--foreground) 28%, transparent);
     background-clip: content-box;
   }
   .font-display { font-family: var(--font-display); }
 }
 
-/* ---- login / brand atmospherics ---- */
-@keyframes aurora-drift {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.9; }
-  50% { transform: translate3d(4%, -3%, 0) scale(1.12); opacity: 1; }
-}
-@keyframes aurora-drift-2 {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1.05); opacity: 0.8; }
-  50% { transform: translate3d(-5%, 4%, 0) scale(1); opacity: 1; }
-}
-@keyframes float-grid {
-  from { background-position: 0 0; }
-  to { background-position: 46px 46px; }
-}
-
-.aurora-blob {
-  position: absolute;
-  border-radius: 9999px;
-  filter: blur(60px);
-  will-change: transform;
-}
+/* ---- login: a single, static hairline grid. No drifting blobs, no aurora. ---- */
 .grid-veil {
   background-image:
     linear-gradient(var(--border) 1px, transparent 1px),
     linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 46px 46px;
-  mask-image: radial-gradient(ellipse 80% 80% at 50% 40%, #000 30%, transparent 80%);
-}
-@media (prefers-reduced-motion: reduce) {
-  .aurora-blob { animation: none !important; }
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 78% 78% at 50% 38%, #000 25%, transparent 78%);
 }
 
 /* ============================================================
-   Command-center design system — motion, texture, surfaces
+   Motion — restrained, motivated. Every animation earns its place.
    ============================================================ */
 
-/* staggered page-load reveal: add .reveal to a container, children rise in */
+/* staggered page-load reveal: add .reveal to a container, children rise in once */
 @keyframes reveal-up {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 .reveal > * {
   opacity: 0;
-  animation: reveal-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: reveal-up 0.42s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 .reveal > *:nth-child(1) { animation-delay: 0.02s; }
-.reveal > *:nth-child(2) { animation-delay: 0.07s; }
-.reveal > *:nth-child(3) { animation-delay: 0.12s; }
-.reveal > *:nth-child(4) { animation-delay: 0.17s; }
-.reveal > *:nth-child(5) { animation-delay: 0.22s; }
-.reveal > *:nth-child(6) { animation-delay: 0.27s; }
-.reveal > *:nth-child(7) { animation-delay: 0.32s; }
-.reveal > *:nth-child(8) { animation-delay: 0.37s; }
+.reveal > *:nth-child(2) { animation-delay: 0.06s; }
+.reveal > *:nth-child(3) { animation-delay: 0.10s; }
+.reveal > *:nth-child(4) { animation-delay: 0.14s; }
+.reveal > *:nth-child(5) { animation-delay: 0.18s; }
+.reveal > *:nth-child(6) { animation-delay: 0.22s; }
+.reveal > *:nth-child(7) { animation-delay: 0.26s; }
+.reveal > *:nth-child(8) { animation-delay: 0.30s; }
 
-/* live pulse ring (for the "watching" / online indicators) */
+/* live pulse ring — only for the "watching" / online signal indicator */
 @keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--signal) 55%, transparent); }
-  70%  { box-shadow: 0 0 0 6px transparent; }
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--signal) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 5px transparent; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .live-dot {
   position: relative;
   border-radius: 9999px;
   background: var(--signal);
-  animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* a slow horizontal "scan" sweep — used on live headers / the watching eye */
-@keyframes scan-sweep {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(120%); }
-}
-.scanline {
-  position: relative;
-  overflow: hidden;
-}
-.scanline::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--signal) 16%, transparent), transparent);
-  transform: translateX(-120%);
-  animation: scan-sweep 4.5s ease-in-out infinite;
-  pointer-events: none;
+  animation: pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* loading shimmer for skeletons */
@@ -276,55 +251,35 @@
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--foreground) 8%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--foreground) 7%, transparent), transparent);
   animation: shimmer 1.6s infinite;
 }
 
-/* card sheen + hover lift — applied via .panel utility */
+/* card: a calm surface. A clear hover state — border + faint shadow, no float, no glow. */
 .panel {
-  position: relative;
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.25s, box-shadow 0.25s;
-}
-.panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(160deg, color-mix(in oklch, var(--foreground) 10%, transparent), transparent 40%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0.6;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 .panel:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in oklch, var(--primary) 40%, var(--border));
-  box-shadow: 0 8px 30px -12px color-mix(in oklch, var(--primary) 35%, transparent);
-}
-
-/* subtle film grain over the app shell for depth */
-.grain::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  border-color: color-mix(in oklch, var(--primary) 32%, var(--border));
+  box-shadow: 0 1px 0 0 color-mix(in oklch, var(--primary) 14%, transparent),
+              0 8px 24px -18px color-mix(in oklch, var(--foreground) 60%, transparent);
 }
 
 /* number tick-in for live metrics */
 @keyframes count-pop {
-  from { opacity: 0; transform: translateY(4px); filter: blur(3px); }
-  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-.count-pop { animation: count-pop 0.45s cubic-bezier(0.22, 1, 0.36, 1); }
-
-/* glow helpers */
-.glow-primary { box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent), 0 6px 24px -10px color-mix(in oklch, var(--primary) 45%, transparent); }
+.count-pop { animation: count-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 
 @media (prefers-reduced-motion: reduce) {
-  .reveal > *, .live-dot, .scanline::after, .shimmer::after, .count-pop { animation: none !important; opacity: 1 !important; }
+  .reveal > *, .live-dot, .shimmer::after, .count-pop, .animate-pulse, .animate-spin {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  /* neutralize any remaining transition-driven motion for motion-sensitive operators */
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

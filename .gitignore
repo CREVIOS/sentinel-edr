@@ -26,3 +26,4 @@ dashboard/.env*
 .env.local
 *.log
 agent/sentinel-ebpf/target/
+dashboard/.pnpm-store/

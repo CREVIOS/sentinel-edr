@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, MonitorSmartphone, ListTree, ShieldAlert, FileLock2,
-  Globe, Crosshair, BookLock, Settings2, LogOut, ChevronsUpDown, FolderKanban,
+  LayoutDashboard, Server, Activity, Globe, Radar, FolderKanban,
+  FileLock2, Crosshair, ScrollText, Settings, LogOut, ChevronsUpDown,
 } from "lucide-react";
 import { SentinelMark } from "@/components/logo";
 import { signOut } from "@/lib/auth-client";
@@ -18,30 +18,38 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
+// Grouped by the product's verbs — Monitor, Detect, Respond — so the nav reads as the
+// security workflow, not an arbitrary list. Icons avoid the shield/lock cliche where a
+// more literal glyph is clearer (Server = Linux host, Radar = active detection).
 const NAV = [
   {
-    label: "Operations",
+    label: "Monitor",
     items: [
       { href: "/", title: "Overview", icon: LayoutDashboard },
-      { href: "/endpoints", title: "Endpoints", icon: MonitorSmartphone },
-      { href: "/events", title: "Event Stream", icon: ListTree },
+      { href: "/endpoints", title: "Endpoints", icon: Server },
+      { href: "/events", title: "Events", icon: Activity },
+      { href: "/internet", title: "Network", icon: Globe },
     ],
   },
   {
-    label: "Threat",
+    label: "Detect",
     items: [
-      { href: "/detections", title: "Detections", icon: ShieldAlert },
+      { href: "/detections", title: "Detections", icon: Radar },
       { href: "/cases", title: "Cases", icon: FolderKanban },
-      { href: "/dlp", title: "Data Loss (DLP)", icon: FileLock2 },
-      { href: "/internet", title: "Internet / Web", icon: Globe },
+      { href: "/dlp", title: "Data Loss", icon: FileLock2 },
     ],
   },
   {
-    label: "Control",
+    label: "Respond",
     items: [
       { href: "/responses", title: "Response", icon: Crosshair },
-      { href: "/rules", title: "Detection Rules", icon: BookLock },
-      { href: "/settings", title: "SIEM / Settings", icon: Settings2 },
+      { href: "/rules", title: "Rules", icon: ScrollText },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { href: "/settings", title: "Settings", icon: Settings },
     ],
   },
 ];
@@ -57,8 +65,8 @@ export function AppSidebar({ user }: { user: { name?: string; email?: string } }
         <div className="flex items-center gap-2.5 px-1.5 py-1.5">
           <SentinelMark className="size-7 text-primary" />
           <div className="grid group-data-[collapsible=icon]:hidden">
-            <span className="font-mono text-sm font-semibold tracking-[0.28em] leading-none">SENTINEL</span>
-            <span className="mt-1 text-[9px] uppercase tracking-[0.3em] text-muted-foreground">EDR · DLP</span>
+            <span className="font-mono text-sm font-semibold tracking-[0.2em] leading-none">SENTINEL</span>
+            <span className="mt-1 text-[10px] text-muted-foreground">EDR &amp; DLP</span>
           </div>
         </div>
       </SidebarHeader>
@@ -66,7 +74,7 @@ export function AppSidebar({ user }: { user: { name?: string; email?: string } }
       <SidebarContent>
         {NAV.map((group) => (
           <SidebarGroup key={group.label}>
-            <SidebarGroupLabel className="font-mono tracking-[0.2em]">{group.label}</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[11px] font-medium text-muted-foreground">{group.label}</SidebarGroupLabel>
             <SidebarMenu>
               {group.items.map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
@@ -74,7 +82,7 @@ export function AppSidebar({ user }: { user: { name?: string; email?: string } }
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton asChild isActive={active} tooltip={item.title}>
                       <Link href={item.href}>
-                        <item.icon />
+                        <item.icon strokeWidth={1.75} />
                         <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>

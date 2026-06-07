@@ -5,7 +5,6 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Chip } from "@/components/severity";
 import { Metric } from "@/components/metric";
-import { Sparkline } from "@/components/sparkline";
 import { DataTable, SortHeader } from "@/components/data-table";
 import { InfoSheet, type Field } from "@/components/info-sheet";
 import { Inspect } from "@/components/inspect";
@@ -26,7 +25,7 @@ function hostOf(remote?: string): string {
 }
 
 export default function InternetPage() {
-  const { data: events } = useData<Event[]>("events?category=network&limit=500", 5000, "event");
+  const { data: events, live } = useData<Event[]>("events?category=network&limit=500", 5000, "event");
   const [sel, setSel] = useState<Event | null>(null);
   const net = useMemo(() => (events || []).filter((e) => e.network), [events]);
 
@@ -63,8 +62,8 @@ export default function InternetPage() {
 
   const destCols: ColumnDef<Dest>[] = [
     { accessorKey: "domain", header: ({ column }) => <SortHeader column={column} title="Destination" />, cell: ({ row }) => <span className="font-mono">{row.original.domain}</span> },
-    { accessorKey: "cat", header: "Category", cell: ({ row }) => <Chip color="var(--chart-2)">{row.original.cat}</Chip> },
-    { accessorKey: "hits", header: ({ column }) => <SortHeader column={column} title="Conns" />, cell: ({ row }) => <span className="font-mono tabular-nums">{row.original.hits}</span> },
+    { accessorKey: "cat", header: "Category", cell: ({ row }) => <Chip>{row.original.cat}</Chip> },
+    { accessorKey: "hits", header: ({ column }) => <SortHeader column={column} title="Connections" />, cell: ({ row }) => <span className="font-mono tabular-nums">{row.original.hits}</span> },
     { accessorKey: "out", header: ({ column }) => <SortHeader column={column} title="Uploaded" />, cell: ({ row }) => <span className="font-mono tabular-nums">{bytes(row.original.out)}</span> },
     { accessorKey: "in", header: ({ column }) => <SortHeader column={column} title="Downloaded" />, cell: ({ row }) => <span className="font-mono tabular-nums text-muted-foreground">{bytes(row.original.in)}</span> },
   ];
@@ -74,7 +73,7 @@ export default function InternetPage() {
     { accessorKey: "hostname", header: ({ column }) => <SortHeader column={column} title="Host" />, cell: ({ row }) => <span className="font-mono">{row.original.hostname}</span> },
     { accessorKey: "user", header: "User", cell: ({ row }) => row.original.user || <span className="text-muted-foreground">—</span> },
     { id: "domain", header: "Destination", cell: ({ row }) => { const n = row.original.network!; return <span className="font-mono">{n.domain || hostOf(n.remote) || "—"}</span>; } },
-    { id: "direction", header: "Dir", cell: ({ row }) => { const d = row.original.network!.direction; return <Chip color={d === "inbound" ? "var(--chart-3)" : "var(--chart-2)"}>{d || "—"}</Chip>; } },
+    { id: "direction", header: "Direction", cell: ({ row }) => { const d = row.original.network!.direction; return <Chip color={d === "inbound" ? "var(--muted-foreground)" : "var(--signal)"}>{d || "—"}</Chip>; } },
     { id: "category", header: "Category", cell: ({ row }) => <Chip>{row.original.network!.category || "web"}</Chip> },
     { id: "out", header: ({ column }) => <SortHeader column={column} title="↑ Out" />, accessorFn: (e) => e.network?.bytes_out || 0, cell: ({ row }) => <span className="font-mono tabular-nums">{bytes(row.original.network!.bytes_out)}</span> },
     { id: "in", header: "↓ In", cell: ({ row }) => <span className="font-mono tabular-nums text-muted-foreground">{bytes(row.original.network!.bytes_in)}</span> },
@@ -93,9 +92,9 @@ export default function InternetPage() {
     const n = e.network!;
     return [
       { label: "Time", value: new Date(e.ts).toLocaleString(), mono: true },
-      { label: "Host", value: e.hostname, mono: true },
-      { label: "User", value: e.user },
-      { label: "Domain", value: n.domain, mono: true, wrap: true },
+      { label: "Host", value: <button className="font-mono hover:text-primary" onClick={() => { window.location.href = `/events?agent_id=${encodeURIComponent(e.agent_id)}`; }}>{e.hostname}</button> },
+      { label: "User", value: e.user ? <button className="hover:text-primary" onClick={() => { window.location.href = `/events?user=${encodeURIComponent(e.user!)}`; }}>{e.user}</button> : undefined },
+      { label: "Domain", value: n.domain ? <button className="break-all text-left font-mono hover:text-primary" onClick={() => { window.location.href = `/events?q=${encodeURIComponent(n.domain!)}`; }}>{n.domain}</button> : undefined, wrap: true },
       { label: "Remote", value: n.remote, mono: true },
       { label: "Protocol", value: n.proto },
       { label: "Direction", value: n.direction },
@@ -111,29 +110,31 @@ export default function InternetPage() {
     <div className="reveal space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Connections" value={net.length} icon={Globe} />
-        <Metric label="Data Uploaded" value={bytes(totalOut)} icon={UploadCloud} accent="var(--primary)" spark={spark} />
-        <Metric label="Cloud Storage" value={cloud} icon={Cloud} accent="var(--chart-1)" />
-        <Metric label="Webmail" value={webmail} icon={Mail} accent="var(--chart-3)" />
+        <Metric label="Data uploaded" value={bytes(totalOut)} icon={UploadCloud} accent="var(--signal)" spark={spark} />
+        <Metric label="Cloud storage" value={cloud} icon={Cloud} accent="var(--muted-foreground)" />
+        <Metric label="Webmail" value={webmail} icon={Mail} accent="var(--muted-foreground)" />
       </div>
 
       <Card className="panel overflow-hidden">
-        <CardHeader className="pb-3"><CardTitle className="font-mono text-xs tracking-[0.16em] text-muted-foreground">TOP DESTINATIONS · by upload</CardTitle></CardHeader>
+        <CardHeader className="pb-3"><CardTitle className="text-sm font-medium text-muted-foreground">Top destinations by upload</CardTitle></CardHeader>
         <CardContent>
           <DataTable
             columns={destCols}
             data={dests}
             rowId={(d) => d.domain}
+            onRowClick={(d) => { window.location.href = `/events?q=${encodeURIComponent(d.domain)}`; }}
             filterPlaceholder="Filter destinations…"
             pageSize={8}
             initialSort={[{ id: "out", desc: true }]}
-            empty="no internet activity captured"
+            empty="No network activity captured"
+            loading={events === undefined}
           />
         </CardContent>
       </Card>
 
       <Card className="panel overflow-hidden">
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2 font-mono text-xs tracking-[0.16em] text-muted-foreground"><span className="live-dot size-1.5" /> WEB ACTIVITY</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">{live && <span className="live-dot size-1.5" />} Web activity</CardTitle>
         </CardHeader>
         <CardContent>
           <DataTable
@@ -144,7 +145,8 @@ export default function InternetPage() {
             filterPlaceholder="Filter host, user, domain…"
             pageSize={15}
             initialSort={[{ id: "ts", desc: true }]}
-            empty="no internet activity captured"
+            empty="No network activity captured"
+            loading={events === undefined}
           />
         </CardContent>
       </Card>
@@ -152,8 +154,8 @@ export default function InternetPage() {
       <InfoSheet
         open={!!sel}
         onOpenChange={(o) => !o && setSel(null)}
-        title={sel ? (sel.network!.domain || sel.network!.remote || "connection") : ""}
-        sub={sel ? `network · ${sel.network!.category || "web"}` : ""}
+        title={sel ? (sel.network!.domain || sel.network!.remote || "Connection") : ""}
+        sub={sel ? `Network · ${sel.network!.category || "web"}` : ""}
         badge={sel?.network!.blocked && <Chip color="var(--sev-critical)">blocked</Chip>}
         fields={sel ? fields(sel) : []}
       />

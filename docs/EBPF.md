@@ -1,19 +1,11 @@
 # Sentinel eBPF — in-kernel telemetry + exec enforcement
 
-> **Status (2026-05-25):** eBPF **telemetry is LIVE on app2/mbovh1** (kernel 6.8, BTF). The
-> `sched_process_exec` tracepoint is loaded + attached across all CPUs and streams real-time
-> exec events *with full paths* into the pipeline (verified: `bpftool prog show` lists the
-> program; 177 events/90s). The `bprm_check_security` **LSM program loads** but is **not
-> attached** — that needs `lsm=…,bpf` in GRUB + a reboot (deferred; the loader warns and
-> continues). The default agent build (and CI) still **excludes** `--features ebpf`, so the
-> shipping binary is unaffected; the eBPF build is opt-in.
->
-> Build that worked: bpf-linker via rustc's bundled LLVM (NOT system LLVM — macOS picks up an
-> old brew llvm@14 and fails on opaque pointers). On Linux, a builder image
-> (`FROM rustlang/rust:nightly-bookworm; RUN rustup component add rust-src && cargo install
-> bpf-linker`) caches bpf-linker; then `cargo build --release` in `sentinel-ebpf/` emits the
-> portable BPF object. Do NOT mount a volume over `/usr/local/cargo` (hides rustc), and do NOT
-> ship a `rust-toolchain.toml` that re-pins the channel (triggers a cross-device rustup sync).
+> **Status:** kernel-gated tier. The userspace agent runs everywhere via the polling tier;
+> eBPF is an *optional augmentation* compiled with `--features ebpf` and a separately-built
+> kernel object. The kernel program and loader in this repo are **scaffolded but not yet
+> compiled/attached on a BTF host from this workspace** — this doc is the runbook to do so.
+> The default agent build (and CI) does **not** include the `ebpf` feature, so nothing here
+> affects the shipping binary.
 
 ## Why
 

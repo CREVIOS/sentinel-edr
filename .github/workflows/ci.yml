@@ -53,8 +53,6 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@v4
-      - name: install libpcap (DNS sniffer links -lpcap)
-        run: sudo apt-get update && sudo apt-get install -y libpcap-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +16,7 @@ import { compact } from "@/lib/format";
 import type { Overview } from "@/lib/types";
 import { TwoFactor } from "@/components/two-factor";
 import {
-  Activity, Database, Cpu, Radio, Download, Copy, KeyRound, LogOut, Sun, Moon,
+  Activity, Cpu, Radio, Download, Copy, KeyRound, LogOut, Sun, Moon,
   ShieldCheck, Server, Loader2, CheckCircle2, AlertTriangle,
 } from "lucide-react";
 
@@ -38,18 +38,30 @@ async function download(kind: string, format: string, filename: string) {
     URL.revokeObjectURL(url);
     toast.success(`Exported ${filename}`);
   } catch (e) {
-    toast.error(`Export failed: ${e}`);
+    toast.error(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 function StatusBadge({ ok }: { ok: boolean }) {
   return ok ? (
-    <Badge className="gap-1.5 border-transparent bg-[color-mix(in_oklch,var(--chart-2)_18%,transparent)] text-[var(--chart-2)]">
+    <Badge className="gap-1.5 border-transparent bg-[color-mix(in_oklch,var(--signal)_18%,transparent)] text-[var(--signal)]">
       <CheckCircle2 className="size-3.5" /> Operational
     </Badge>
   ) : (
     <Badge className="gap-1.5 border-transparent bg-[color-mix(in_oklch,var(--destructive)_18%,transparent)] text-destructive">
       <AlertTriangle className="size-3.5" /> Unreachable
+    </Badge>
+  );
+}
+
+function ActivityBadge({ active }: { active: boolean }) {
+  return active ? (
+    <Badge className="gap-1.5 border-transparent bg-[color-mix(in_oklch,var(--signal)_18%,transparent)] text-[var(--signal)]">
+      <Activity className="size-3.5" /> Active
+    </Badge>
+  ) : (
+    <Badge variant="secondary" className="gap-1.5 border-transparent text-muted-foreground">
+      <Radio className="size-3.5" /> Idle
     </Badge>
   );
 }
@@ -61,11 +73,6 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">Platform health, account, agent enrollment, integrations &amp; appearance.</p>
-      </div>
-
       <Tabs defaultValue="system">
         <TabsList>
           <TabsTrigger value="system">System</TabsTrigger>
@@ -78,40 +85,52 @@ export default function SettingsPage() {
         {/* SYSTEM */}
         <TabsContent value="system" className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="font-mono text-sm tracking-wide">SERVICE HEALTH</CardTitle><CardDescription>Live status of platform tiers</CardDescription></CardHeader>
+            <CardHeader><CardTitle className="text-sm font-medium text-muted-foreground">Service health</CardTitle><CardDescription>Live status of platform tiers</CardDescription></CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
-              {[
-                { icon: Server, label: "Control plane (API)", ok: live },
-                { icon: Database, label: "Storage (TimescaleDB)", ok: live },
-                { icon: Cpu, label: "Detection engine", ok: live },
-                { icon: Radio, label: "Telemetry pipeline", ok: (c.events_24h ?? 0) > 0 },
-              ].map((s) => (
-                <div key={s.label} className="flex items-center gap-3 rounded-lg border bg-secondary/30 p-3.5">
-                  <s.icon className="size-4 text-muted-foreground" />
-                  <span className="text-sm">{s.label}</span>
-                  <span className="ml-auto"><StatusBadge ok={s.ok} /></span>
-                </div>
-              ))}
+              {ov === undefined ? (
+                Array.from({ length: 2 }).map((_, i) => (
+                  <div key={i} className="shimmer h-[58px] rounded-lg bg-muted" />
+                ))
+              ) : (
+                <>
+                  <div className="flex items-center gap-3 rounded-lg border bg-secondary/30 p-3.5">
+                    <Server className="size-4 text-muted-foreground" />
+                    <span className="text-sm">Control plane</span>
+                    <span className="ml-auto"><StatusBadge ok={live} /></span>
+                  </div>
+                  <div className="flex items-center gap-3 rounded-lg border bg-secondary/30 p-3.5">
+                    <Radio className="size-4 text-muted-foreground" />
+                    <span className="text-sm">Recent telemetry (24h)</span>
+                    <span className="ml-auto"><ActivityBadge active={(c.events_24h ?? 0) > 0} /></span>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[
-              { label: "Endpoints", value: c.agents_total ?? 0, sub: `${c.agents_online ?? 0} online`, icon: ShieldCheck },
-              { label: "Events · 24h", value: compact(c.events_24h ?? 0), sub: "ingested", icon: Activity },
-              { label: "Open detections", value: c.detections_open ?? 0, sub: `${c.detections_critical ?? 0} critical`, icon: AlertTriangle },
-              { label: "Responses", value: c.responses_total ?? 0, sub: "issued", icon: Cpu },
-            ].map((k) => (
-              <Card key={k.label}><CardContent className="p-4">
-                <div className="flex items-center justify-between"><span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{k.label}</span><k.icon className="size-4 text-muted-foreground" /></div>
-                <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">{k.value}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{k.sub}</div>
-              </CardContent></Card>
-            ))}
+            {ov === undefined ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="shimmer h-[104px] rounded-xl bg-muted" />
+              ))
+            ) : (
+              [
+                { label: "Endpoints", value: c.agents_total ?? 0, sub: `${c.agents_online ?? 0} online`, icon: ShieldCheck },
+                { label: "Events · 24h", value: compact(c.events_24h ?? 0), sub: "ingested", icon: Activity },
+                { label: "Open detections", value: c.detections_open ?? 0, sub: `${c.detections_critical ?? 0} critical`, icon: AlertTriangle },
+                { label: "Responses", value: c.responses_total ?? 0, sub: "issued", icon: Cpu },
+              ].map((k) => (
+                <Card key={k.label}><CardContent className="p-4">
+                  <div className="flex items-center justify-between"><span className="text-xs font-medium text-muted-foreground">{k.label}</span><k.icon className="size-4 text-muted-foreground" /></div>
+                  <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">{k.value}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{k.sub}</div>
+                </CardContent></Card>
+              ))
+            )}
           </div>
 
           <Card>
-            <CardHeader><CardTitle className="font-mono text-sm tracking-wide">DEPLOYMENT</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-sm font-medium text-muted-foreground">Deployment</CardTitle></CardHeader>
             <CardContent>
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 {[
@@ -135,7 +154,7 @@ export default function SettingsPage() {
         {/* ACCOUNT */}
         <TabsContent value="account" className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="font-mono text-sm tracking-wide">OPERATOR</CardTitle></CardHeader>
+            <CardHeader><CardTitle className="text-sm font-medium text-muted-foreground">Operator</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 <Row k="Name" v={session?.user?.name || "—"} />
@@ -155,24 +174,13 @@ export default function SettingsPage() {
 
         {/* AGENTS */}
         <TabsContent value="agents" className="space-y-4">
-          <Card>
-            <CardHeader><CardTitle className="font-mono text-sm tracking-wide">ENROLL AN ENDPOINT</CardTitle><CardDescription>Run on the Linux host to enroll it into the fleet.</CardDescription></CardHeader>
-            <CardContent className="space-y-4">
-              <CommandBlock title="Native (systemd)" cmd={`sentinel-agent \\\n  --server https://sentinel.corp:8443 \\\n  --enroll-token <ENROLL_TOKEN> \\\n  --watch /etc,/usr/local/bin,/home`} />
-              <CommandBlock title="Docker" cmd={`docker run -d --name sentinel-agent --cap-add NET_ADMIN \\\n  -e SENTINEL_SERVER=https://sentinel.corp:8443 \\\n  -e SENTINEL_ENROLL_TOKEN=<ENROLL_TOKEN> \\\n  sentinel/agent:1.0`} />
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                The enrollment token is held server-side (<code className="font-mono">SENTINEL_ENROLL_TOKEN</code>). Replace
-                <code className="font-mono"> &lt;ENROLL_TOKEN&gt;</code> with your value. Agents authenticate per-request with a
-                per-agent key issued at enrollment; enable mTLS with <code className="font-mono">SENTINEL_TLS_CLIENT_CA</code>.
-              </p>
-            </CardContent>
-          </Card>
+          <EnrollPanel />
         </TabsContent>
 
         {/* SIEM */}
         <TabsContent value="siem" className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="font-mono text-sm tracking-wide">SIEM INTEGRATION</CardTitle><CardDescription>Export normalized telemetry for Splunk / Elastic / QRadar.</CardDescription></CardHeader>
+            <CardHeader><CardTitle className="text-sm font-medium text-muted-foreground">SIEM integration</CardTitle><CardDescription>Export normalized telemetry for Splunk / Elastic / QRadar.</CardDescription></CardHeader>
             <CardContent className="grid gap-2 sm:grid-cols-3">
               <Button variant="outline" className="justify-start font-mono" onClick={() => download("events", "cef", "sentinel-events.cef")}><Download className="size-4" /> Events · CEF</Button>
               <Button variant="outline" className="justify-start font-mono" onClick={() => download("events", "ecs", "sentinel-events-ecs.ndjson")}><Download className="size-4" /> Events · ECS</Button>
@@ -199,14 +207,69 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
+function Code({ children }: { children: React.ReactNode }) {
+  return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{children}</code>;
+}
+
+function EnrollPanel() {
+  // The command auto-fills this console's own URL so it is copy-paste correct for this
+  // deployment (origin is only available after mount, so it is read client-side).
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+  const server = origin || "https://<your-console>";
+
+  const quick =
+    `curl -fsSL ${server}/install-agent.sh | sudo \\\n` +
+    `  SENTINEL_SERVER=${server} \\\n` +
+    `  SENTINEL_ENROLL_TOKEN=<ENROLL_TOKEN> \\\n` +
+    `  SENTINEL_REQUIRE_CHECKSUM=1 SENTINEL_REQUIRE_SIGNATURE=1 bash`;
+
+  const docker =
+    `docker run -d --name sentinel-agent --restart unless-stopped \\\n` +
+    `  --pid host --cap-add NET_ADMIN \\\n` +
+    `  -e SENTINEL_SERVER=${server} \\\n` +
+    `  -e SENTINEL_ENROLL_TOKEN=<ENROLL_TOKEN> \\\n` +
+    `  sentinel/agent:latest`;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium text-muted-foreground">Enroll an endpoint</CardTitle>
+        <CardDescription>Run on a Linux host to install the agent and enroll it into the fleet.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <CommandBlock title="Quick install (Linux)" cmd={quick} />
+        <CommandBlock title="Docker" cmd={docker} />
+        <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            Replace <Code>&lt;ENROLL_TOKEN&gt;</Code> with the value of <Code>SENTINEL_ENROLL_TOKEN</Code> configured
+            on the server. The same token enrolls any number of hosts; each agent is then issued its own per-host key.
+          </p>
+          <p>
+            The installer is HTTPS-pinned and verifies the agent against a published SHA-256 and an Ed25519
+            signature before installing. <Code>SENTINEL_REQUIRE_CHECKSUM=1</Code> and
+            <Code>SENTINEL_REQUIRE_SIGNATURE=1</Code> fail closed if either is missing. It then installs and enables a
+            hardened <Code>systemd</Code> service that restarts on crash and reboot.
+          </p>
+          <p>
+            Manage with <Code>systemctl status sentinel-agent</Code>, follow logs with
+            <Code>journalctl -u sentinel-agent -f</Code>, and enable mutual TLS via
+            <Code>SENTINEL_AGENT_TLS_CA</Code> / <Code>_CERT</Code> / <Code>_KEY</Code>.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function CommandBlock({ title, cmd }: { title: string; cmd: string }) {
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
-        <span className="font-mono text-[11px] uppercase tracking-wide text-muted-foreground">{title}</span>
+        <span className="text-xs font-medium text-muted-foreground">{title}</span>
         <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={() => copy(cmd.replace(/\\\n\s*/g, " "), title + " command")}><Copy className="size-3.5" /> Copy</Button>
       </div>
-      <pre className="overflow-x-auto rounded-lg border bg-secondary/40 p-3.5 font-mono text-xs leading-relaxed text-chart-2">{cmd}</pre>
+      <pre className="overflow-x-auto rounded-lg border bg-secondary/40 p-3.5 font-mono text-xs leading-relaxed text-foreground">{cmd}</pre>
     </div>
   );
 }
@@ -228,19 +291,19 @@ function ChangePassword() {
 
   return (
     <Card>
-      <CardHeader><CardTitle className="font-mono text-sm tracking-wide">CHANGE PASSPHRASE</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-sm font-medium text-muted-foreground">Change password</CardTitle></CardHeader>
       <CardContent>
         <form onSubmit={submit} className="grid max-w-md gap-3">
           <div className="space-y-1.5">
-            <Label htmlFor="cur" className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Current</Label>
+            <Label htmlFor="cur" className="text-xs font-medium text-muted-foreground">Current</Label>
             <Input id="cur" type="password" value={cur} onChange={(e) => setCur(e.target.value)} required />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="np" className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">New (min 8)</Label>
+            <Label htmlFor="np" className="text-xs font-medium text-muted-foreground">New (min 8)</Label>
             <Input id="np" type="password" value={next} onChange={(e) => setNext(e.target.value)} required />
           </div>
           <Button type="submit" className="w-fit" disabled={busy}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Update passphrase
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />} Update password
           </Button>
         </form>
       </CardContent>
@@ -251,13 +314,13 @@ function ChangePassword() {
 function ThemePicker() {
   const { theme, setTheme } = useTheme();
   const opts = [
-    { id: "dark", label: "Aurora Dark", icon: Moon, desc: "Deep indigo · low-light SOC default" },
-    { id: "light", label: "Daylight", icon: Sun, desc: "Bright surfaces · high ambient light" },
+    { id: "dark", label: "Dark", icon: Moon, desc: "Low-light SOC default" },
+    { id: "light", label: "Light", icon: Sun, desc: "Bright surfaces · high ambient light" },
     { id: "system", label: "System", icon: Activity, desc: "Match OS preference" },
   ];
   return (
     <Card>
-      <CardHeader><CardTitle className="font-mono text-sm tracking-wide">THEME</CardTitle><CardDescription>Centralized color tokens; switches instantly.</CardDescription></CardHeader>
+      <CardHeader><CardTitle className="text-sm font-medium text-muted-foreground">Theme</CardTitle><CardDescription>Centralized color tokens; switches instantly.</CardDescription></CardHeader>
       <CardContent className="grid gap-3 sm:grid-cols-3">
         {opts.map((o) => {
           const active = theme === o.id;
@@ -265,7 +328,7 @@ function ThemePicker() {
             <button
               key={o.id}
               onClick={() => { setTheme(o.id); toast.success(`Theme: ${o.label}`); }}
-              className={`rounded-xl border p-4 text-left transition ${active ? "border-primary bg-primary/10 ring-1 ring-primary" : "hover:bg-secondary/40"}`}
+              className={`rounded-xl border p-4 text-left transition ${active ? "border-primary bg-primary/5" : "hover:bg-secondary/40"}`}
             >
               <o.icon className="size-5 text-primary" />
               <div className="mt-2 text-sm font-medium">{o.label}</div>

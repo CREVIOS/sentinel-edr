@@ -5,12 +5,13 @@
 #   curl -fsSL https://<console>/install-agent.sh | sudo \
 #     SENTINEL_SERVER=https://<console> \
 #     SENTINEL_ENROLL_TOKEN=xxxxx \
-#     SENTINEL_REQUIRE_CHECKSUM=1 bash
+#     SENTINEL_SIGNING_PUBKEY_FILE=/etc/sentinel/release-signing.pub \
+#     bash
 #
 # The whole script is wrapped in main() and executed only on the last line, so a truncated
 # or interrupted download can never run a partial install. Downloads are HTTPS-pinned, the
-# agent binary is verified against a published SHA-256 AND an Ed25519 signature before it is
-# installed, and the service is installed as a hardened systemd unit.
+# agent binary is verified against a published SHA-256 and, by default, an Ed25519 signature
+# before it is installed, and the service is installed as a hardened systemd unit.
 #
 # Resolves a binary in this order:
 #   1) $SENTINEL_AGENT_BINARY              (path to a prebuilt binary)
@@ -19,12 +20,14 @@
 #
 set -euo pipefail
 
-# --- Embedded release signing key (Ed25519, verified with openssl pkeyutl) ---------------
-# The matching private key never touches the web root. A tampered binary on the download
-# server is rejected here unless the attacker also holds this offline key.
-SENTINEL_SIGNING_PUBKEY='-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAh55RC7Btddbiyh77dtBezFW6derUKr2jGanCnzyCiBU=
------END PUBLIC KEY-----'
+# Release signing public key (Ed25519, verified with openssl pkeyutl).
+#
+# Do not bake the old committed key back into this script: its private key was exposed in Git
+# history and must be rotated. For production installs, provide the rotated trust anchor via
+# SENTINEL_SIGNING_PUBKEY_FILE or SENTINEL_SIGNING_PUBKEY_PEM. Signature verification is required
+# by default; set SENTINEL_REQUIRE_SIGNATURE=0 only for local development.
+DEFAULT_SENTINEL_SIGNING_PUBKEY=''
+SENTINEL_REQUIRE_SIGNATURE="${SENTINEL_REQUIRE_SIGNATURE:-1}"
 
 log()  { printf '\033[36m▸\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!\033[0m %s\n' "$*" >&2; }
@@ -71,27 +74,44 @@ verify_checksum() {
 }
 
 verify_signature() {
-  # $1 = local file, $2 = signature URL. Ed25519 over the raw binary. Fails closed when a
-  # signature is present but invalid, or when SENTINEL_REQUIRE_SIGNATURE=1 and it is missing.
-  local file="$1" url="$2" pub
+  # $1 = local file, $2 = signature URL. Ed25519 over the raw binary. Fails closed by default.
+  local file="$1" url="$2" pub="" tmp_pub=""
+
   if ! command -v openssl >/dev/null 2>&1; then
-    [ "${SENTINEL_REQUIRE_SIGNATURE:-0}" = "1" ] && die "openssl not found and SENTINEL_REQUIRE_SIGNATURE=1 — aborting"
+    [ "$SENTINEL_REQUIRE_SIGNATURE" = "1" ] && die "openssl not found and signature verification is required — aborting"
     warn "openssl not found — skipping signature verification"
     return 0
   fi
-  if sc_curl "$url" -o "$file.sig" 2>/dev/null; then
-    pub="$(mktemp)"; printf '%s\n' "$SENTINEL_SIGNING_PUBKEY" > "$pub"
-    if openssl pkeyutl -verify -pubin -inkey "$pub" -rawin -in "$file" -sigfile "$file.sig" >/dev/null 2>&1; then
-      log "signature verified (ed25519)"
-    else
-      rm -f "$pub" "$file.sig"; die "agent signature verification FAILED — aborting (possible tampering)"
-    fi
-    rm -f "$pub" "$file.sig"
-  elif [ "${SENTINEL_REQUIRE_SIGNATURE:-0}" = "1" ]; then
-    die "no signature at $url and SENTINEL_REQUIRE_SIGNATURE=1 — aborting"
-  else
+
+  if ! sc_curl "$url" -o "$file.sig" 2>/dev/null; then
+    [ "$SENTINEL_REQUIRE_SIGNATURE" = "1" ] && die "no signature at $url and signature verification is required — aborting"
     warn "no signature published at $url — set SENTINEL_REQUIRE_SIGNATURE=1 to fail closed"
+    return 0
   fi
+
+  if [ -n "${SENTINEL_SIGNING_PUBKEY_FILE:-}" ]; then
+    [ -r "$SENTINEL_SIGNING_PUBKEY_FILE" ] || { rm -f "$file.sig"; die "cannot read SENTINEL_SIGNING_PUBKEY_FILE=$SENTINEL_SIGNING_PUBKEY_FILE"; }
+    pub="$SENTINEL_SIGNING_PUBKEY_FILE"
+  elif [ -n "${SENTINEL_SIGNING_PUBKEY_PEM:-}" ]; then
+    tmp_pub="$(mktemp)"
+    printf '%s\n' "$SENTINEL_SIGNING_PUBKEY_PEM" > "$tmp_pub"
+    pub="$tmp_pub"
+  elif [ -n "$DEFAULT_SENTINEL_SIGNING_PUBKEY" ]; then
+    tmp_pub="$(mktemp)"
+    printf '%s\n' "$DEFAULT_SENTINEL_SIGNING_PUBKEY" > "$tmp_pub"
+    pub="$tmp_pub"
+  else
+    rm -f "$file.sig"
+    die "signature is present but no trusted signing public key is configured; rotate the exposed key and set SENTINEL_SIGNING_PUBKEY_FILE"
+  fi
+
+  if openssl pkeyutl -verify -pubin -inkey "$pub" -rawin -in "$file" -sigfile "$file.sig" >/dev/null 2>&1; then
+    log "signature verified (ed25519)"
+  else
+    rm -f "$tmp_pub" "$file.sig"
+    die "agent signature verification FAILED — aborting (possible tampering)"
+  fi
+  rm -f "$tmp_pub" "$file.sig"
 }
 
 main() {

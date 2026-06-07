@@ -46,7 +46,7 @@ jobs:
           echo "No third-party dependency vulnerabilities (stdlib advisories track the toolchain)."
 
   agent:
-    name: Rust agent (test · clippy · audit)
+    name: Rust agent Linux (test · clippy · eBPF · audit)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,6 +73,20 @@ jobs:
         run: |
           cargo install cargo-audit --locked || true
           cargo audit || true
+
+  agent-macos:
+    name: Rust agent macOS (build · test)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+      - run: cargo test
 
   console:
     name: Dashboard (typecheck · build · audit)

@@ -189,6 +189,7 @@ EOF
 Description=Sentinel Endpoint Agent (EDR/DLP)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -199,15 +200,18 @@ RestartSec=5
 StateDirectory=sentinel
 Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json
 
-# Capabilities the agent genuinely needs: nftables isolation (NET_ADMIN), eBPF/kernel-module
-# load (SYS_MODULE/BPF), process containment (KILL).
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_BPF CAP_KILL
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_MODULE CAP_BPF CAP_KILL CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
+# Capabilities the agent genuinely needs: nftables isolation/upload-block (NET_ADMIN),
+# eBPF/perf capture (BPF/PERFMON), DNS sniffing (NET_RAW), USB module control (SYS_MODULE),
+# process containment/inspection (KILL/SYS_PTRACE), and root-owned file reads/quarantine.
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_MODULE CAP_BPF CAP_PERFMON CAP_NET_RAW CAP_KILL CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_MODULE CAP_BPF CAP_PERFMON CAP_NET_RAW CAP_KILL CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE
 
-# Self-protection + sandboxing. These are SAFE for an EDR agent.
+# Self-protection + sandboxing. Keep /usr/local/bin writable so verified self-update can
+# atomically stage and replace /usr/local/bin/sentinel-agent; the rest of /usr remains read-only.
 NoNewPrivileges=true
 OOMScoreAdjust=-1000
 ProtectSystem=full
+ReadWritePaths=/var/lib/sentinel /usr/local/bin
 ProtectHome=read-only
 ProtectClock=true
 ProtectHostname=true
@@ -215,15 +219,17 @@ ProtectKernelLogs=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
 LockPersonality=true
+PrivateTmp=true
 SystemCallArchitectures=native
 
 # Intentionally NOT set — each would break a core EDR capability:
-#   ProtectKernelModules   → agent loads eBPF/kernel modules (CAP_SYS_MODULE)
-#   MemoryDenyWriteExecute → eBPF JIT needs W^X exemption
-#   PrivateDevices         → USB / removable-media monitoring needs /dev
-#   RestrictAddressFamilies→ AF_NETLINK is required for process/net telemetry
-#   ProtectControlGroups / ProtectKernelTunables → cgroup-freeze response + sysctl posture
-#   SystemCallFilter       → too broad to constrain safely for a full-system monitor
+#   ProtectKernelModules    → agent unloads USB storage modules and may load eBPF/kernel helpers
+#   MemoryDenyWriteExecute  → eBPF JIT can need W^X exemptions on some hosts
+#   PrivateDevices          → USB / removable-media monitoring needs /dev
+#   RestrictAddressFamilies → AF_NETLINK/packet sockets are required for process/net telemetry
+#   ProtectControlGroups    → cgroup-freeze response needs cgroup access
+#   ProtectKernelTunables   → posture collection reads kernel/sysctl state
+#   SystemCallFilter        → too broad to constrain safely for a full-system monitor
 
 [Install]
 WantedBy=multi-user.target

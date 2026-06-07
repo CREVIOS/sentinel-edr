@@ -369,10 +369,10 @@ impl Responder {
     }
 
     // -------- agent self-update (verified binary swap + supervised restart) --------
-    // Downloads a new agent binary over HTTPS, verifies its sha256 against the value the
-    // server signed into the command, atomically replaces the running binary, and asks
-    // systemd to restart us into it. Gated behind `enforce` so a compromised channel can't
-    // silently swap the binary on a monitor-only fleet.
+    // Downloads a new agent binary over HTTPS from the configured Sentinel server, verifies
+    // its sha256 against the command's expected digest, atomically replaces the running
+    // binary, and asks systemd to restart us into it. Gated behind `enforce` so a
+    // compromised channel can't silently swap the binary on a monitor-only fleet.
     fn self_update(&self, cmd: &Cmd) -> Result<String, String> {
         if !self.enforce() {
             return Err("self-update disabled by policy (--enforce=false)".into());
@@ -393,21 +393,17 @@ impl Responder {
             .get("version")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        // HTTPS only (the binary is integrity-checked anyway, but no plaintext fetch) and a
-        // well-formed digest before we touch the network.
-        if !url.starts_with("https://") {
-            return Err("update url must be https".into());
-        }
+        let update_url = validate_update_url(url, &self.server_host)?;
         if sha.len() != 64 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("sha256 must be 64 hex chars".into());
         }
         #[cfg(target_os = "linux")]
         {
-            self.apply_self_update(url, &sha, version)
+            self.apply_self_update(update_url.as_str(), &sha, version)
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = version;
+            let _ = (version, update_url);
             Err("self-update only supported on Linux".into())
         }
     }
@@ -710,6 +706,42 @@ fn stderr(b: &[u8]) -> String {
     String::from_utf8_lossy(b).trim().to_string()
 }
 
+fn validate_update_url(url: &str, trusted_host: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid update url: {e}"))?;
+    if parsed.scheme() != "https" {
+        return Err("update url must be https".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("update url must not contain credentials".into());
+    }
+    if parsed.fragment().is_some() {
+        return Err("update url must not contain a fragment".into());
+    }
+    let update_host = parsed
+        .host_str()
+        .ok_or_else(|| "update url must include a host".to_string())?;
+    if !hosts_match(update_host, trusted_host) {
+        return Err(format!(
+            "update host {update_host} is not the trusted Sentinel server {trusted_host}"
+        ));
+    }
+    Ok(parsed)
+}
+
+fn hosts_match(update_host: &str, trusted_host: &str) -> bool {
+    let update = normalize_host(update_host);
+    let trusted = normalize_host(trusted_host);
+    !trusted.is_empty() && update == trusted
+}
+
+fn normalize_host(host: &str) -> String {
+    host.trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.')
+        .to_ascii_lowercase()
+}
+
 #[cfg(target_os = "linux")]
 fn nft(args: &[&str]) -> Result<(), String> {
     let out = Command::new("nft")
@@ -927,6 +959,45 @@ mod tests {
     }
 
     #[test]
+    fn self_update_url_validation_pins_trusted_server() {
+        let good = validate_update_url(
+            "https://APP2.MAKEBELL.COM./agent/sentinel-agent",
+            "app2.makebell.com",
+        )
+        .unwrap();
+        assert_eq!(good.scheme(), "https");
+        assert_eq!(good.host_str(), Some("app2.makebell.com."));
+
+        assert!(
+            validate_update_url("http://app2.makebell.com/agent", "app2.makebell.com")
+                .unwrap_err()
+                .contains("https")
+        );
+        assert!(
+            validate_update_url("https://evil.example/agent", "app2.makebell.com")
+                .unwrap_err()
+                .contains("trusted Sentinel server")
+        );
+        assert!(
+            validate_update_url("https://app2.makebell.com.evil/agent", "app2.makebell.com")
+                .unwrap_err()
+                .contains("trusted Sentinel server")
+        );
+        assert!(validate_update_url(
+            "https://user:pass@app2.makebell.com/agent",
+            "app2.makebell.com"
+        )
+        .unwrap_err()
+        .contains("credentials"));
+        assert!(validate_update_url(
+            "https://app2.makebell.com/agent#fragment",
+            "app2.makebell.com"
+        )
+        .unwrap_err()
+        .contains("fragment"));
+    }
+
+    #[test]
     fn kill_process_rejects_pid_le_1() {
         let r = responder();
         assert!(!r.execute(&cmd("kill_process", json!({"pid": 1}))).ok);
@@ -951,6 +1022,20 @@ mod tests {
     #[test]
     fn unknown_command_is_rejected() {
         assert!(!responder().execute(&cmd("nuke_everything", json!({}))).ok);
+    }
+
+    #[test]
+    fn self_update_rejects_untrusted_host_before_download() {
+        let r = responder();
+        let res = r.execute(&cmd(
+            "self_update",
+            json!({
+                "url": "https://evil.example/sentinel-agent",
+                "sha256": "a".repeat(64),
+            }),
+        ));
+        assert!(!res.ok);
+        assert!(res.message.contains("trusted Sentinel server"));
     }
 
     #[test]

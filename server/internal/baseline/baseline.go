@@ -9,6 +9,8 @@
 package baseline
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"sync"
 	"time"
 
@@ -73,8 +75,8 @@ func (e *Engine) Observe(ev *model.Event) []*model.Detection {
 			if id == "" {
 				id = ev.Process.Name
 			}
-			if id != "" && e.note(e.execs, ev.AgentID, id) && mature {
-				if d := e.maybe(ev, now, "exec:"+id,
+			if novel, key := e.note(e.execs, ev.AgentID, id); novel && mature {
+				if d := e.maybe(ev, now, "exec:"+key,
 					"baseline-new-binary", "First-seen binary on this host",
 					"Execution", []string{"T1204"},
 					"first execution of "+display(ev.Process.Name, ev.Process.Exe)+" on "+host(ev)); d != nil {
@@ -83,8 +85,8 @@ func (e *Engine) Observe(ev *model.Event) []*model.Detection {
 			}
 			if ev.Process.Parent != "" && ev.Process.Name != "" {
 				pc := ev.Process.Parent + ">" + ev.Process.Name
-				if e.note(e.parents, ev.AgentID, pc) && mature {
-					if d := e.maybe(ev, now, "anc:"+pc,
+				if novel, key := e.note(e.parents, ev.AgentID, pc); novel && mature {
+					if d := e.maybe(ev, now, "anc:"+key,
 						"baseline-new-ancestry", "First-seen process ancestry on this host",
 						"Execution", []string{"T1059"},
 						"first time "+ev.Process.Parent+" spawned "+ev.Process.Name+" on "+host(ev)); d != nil {
@@ -99,8 +101,8 @@ func (e *Engine) Observe(ev *model.Event) []*model.Detection {
 			if peer == "" {
 				peer = ipOnly(ev.Network.Remote)
 			}
-			if peer != "" && e.note(e.peers, ev.AgentID, peer) && mature {
-				if d := e.maybe(ev, now, "peer:"+peer,
+			if novel, key := e.note(e.peers, ev.AgentID, peer); novel && mature {
+				if d := e.maybe(ev, now, "peer:"+key,
 					"baseline-new-destination", "First-seen outbound destination from this host",
 					"Command and Control", []string{"T1071"},
 					"first outbound connection to "+peer+" from "+host(ev)); d != nil {
@@ -112,23 +114,26 @@ func (e *Engine) Observe(ev *model.Event) []*model.Detection {
 	return out
 }
 
-// note records value v in set[agent]; returns true if it was NOT seen before (novel).
-func (e *Engine) note(set map[string]map[string]struct{}, agent, v string) bool {
+// note records a bounded key for value v in set[agent]; returns whether it was novel and the key.
+func (e *Engine) note(set map[string]map[string]struct{}, agent, v string) (bool, string) {
+	k := key(v)
 	m := set[agent]
 	if m == nil {
 		m = map[string]struct{}{}
 		set[agent] = m
 	}
-	if _, ok := m[v]; ok {
-		return false
+	if _, ok := m[k]; ok {
+		return false, k
 	}
 	if len(m) >= maxPerDim {
-		// bounded: once saturated, stop learning new values (and don't alert) to cap memory;
-		// a host with >8k distinct binaries/peers is already past useful baselining.
-		return false
+		// bounded: evict one existing value to keep learning/alerting novel activity.
+		for old := range m {
+			delete(m, old)
+			break
+		}
 	}
-	m[v] = struct{}{}
-	return true
+	m[k] = struct{}{}
+	return true, k
 }
 
 func (e *Engine) maybe(ev *model.Event, now time.Time, key, ruleID, name, tactic string, mitre []string, summary string) *model.Detection {
@@ -198,4 +203,9 @@ func lastColon(s string) int {
 		}
 	}
 	return idx
+}
+
+func key(v string) string {
+	sum := sha256.Sum256([]byte(v))
+	return hex.EncodeToString(sum[:])
 }

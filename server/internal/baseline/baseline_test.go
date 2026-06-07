@@ -64,3 +64,39 @@ func TestNewOutboundDestination(t *testing.T) {
 		t.Fatalf("expected first-seen-destination anomaly, got %+v", d)
 	}
 }
+
+func TestSaturationStillLearnsNovelValues(t *testing.T) {
+	e := New(0)
+	now := time.Now().UTC()
+	agent := "sat-agent"
+	for i := 0; i < maxPerDim; i++ {
+		d := e.Observe(execEv(agent, "h", "hash-fill-"+time.Duration(i).String(), "bin", now))
+		if len(d) != 1 {
+			t.Fatalf("expected detection while filling baseline at %d, got %d", i, len(d))
+		}
+	}
+	// One more novel value beyond the cap should still be treated as novel.
+	d := e.Observe(execEv(agent, "h", "hash-over-cap", "bin", now))
+	if len(d) != 1 {
+		t.Fatalf("expected novel detection after saturation, got %d", len(d))
+	}
+}
+
+func TestBaselineStoresBoundedKeySize(t *testing.T) {
+	e := New(0)
+	now := time.Now().UTC()
+	big := make([]byte, 64*1024)
+	for i := range big {
+		big[i] = 'a'
+	}
+	e.Observe(execEv("a-bound", "h", string(big), "bin", now))
+	m := e.execs["a-bound"]
+	if len(m) != 1 {
+		t.Fatalf("expected one stored key, got %d", len(m))
+	}
+	for k := range m {
+		if len(k) != 64 {
+			t.Fatalf("expected sha256 hex key length 64, got %d", len(k))
+		}
+	}
+}

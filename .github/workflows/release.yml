@@ -10,13 +10,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # create the GitHub Release
-  packages: write   # push images to GHCR
+  contents: read
 
 jobs:
   agent-binaries:
     name: Agent binary (${{ matrix.target }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
@@ -53,6 +54,8 @@ jobs:
     needs: agent-binaries
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with: { path: dist, merge-multiple: true }
@@ -65,6 +68,9 @@ jobs:
   images:
     name: Container images (server + dashboard)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

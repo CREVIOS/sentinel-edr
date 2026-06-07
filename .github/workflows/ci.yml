@@ -56,7 +56,7 @@ jobs:
       - name: Install native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libpcap-dev
+          sudo apt-get install -y clang libelf-dev libpcap-dev pkg-config zlib1g-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -68,6 +68,7 @@ jobs:
       # in the default build, so don't fail CI on warnings — surface them instead.
       - run: cargo clippy --all-targets || true
       - run: cargo test
+      - run: cargo check --features ebpf
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked || true

@@ -3,7 +3,8 @@ SHELL := /bin/bash
 
 .PHONY: help build build-web build-server build-agent test test-go test-agent test-web e2e up down logs \
         dev-deps dev-server agent-scenario tls clean fmt \
-        prod-help prod-deploy prod-deploy-all prod-status prod-health prod-logs prod-backup prod-rollback-list
+        prod-help prod-deploy prod-deploy-all prod-status prod-health prod-logs prod-backup prod-rollback-list \
+        local-deploy local-status local-health local-logs local-down
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -88,3 +89,18 @@ prod-backup: ## Production: back up env/keys + tag rollback images
 	@$(PROD) backup
 prod-rollback-list: ## Production: list server rollback image tags
 	@$(PROD) rollback-list
+
+# ---- local server: full single-box stack behind nginx (deploy/local/deploy.sh) ----
+# Self-contained HTTP deploy on one machine. See deploy/local/README.md.
+LOCAL := deploy/local/deploy.sh
+
+local-deploy: ## Local: deploy the full stack on this box (build + migrate + seed + up)
+	@$(LOCAL)
+local-status: ## Local: container status
+	@$(LOCAL) status
+local-health: ## Local: probe public endpoints
+	@$(LOCAL) health
+local-logs: ## Local: tail stack logs
+	@$(LOCAL) logs
+local-down: ## Local: stop the stack (data volumes kept)
+	@$(LOCAL) down

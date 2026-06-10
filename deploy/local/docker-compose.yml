@@ -1,0 +1,141 @@
+# Sentinel EDR — self-contained LOCAL-SERVER stack (single box, HTTP).
+#
+# Everything runs on one internal Docker network. Only nginx publishes a host port; the
+# database, NATS, Go server, and Next.js dashboard are NOT reachable from the host directly —
+# all traffic enters through nginx, exactly like the production app2 topology but without the
+# shared host proxy or public TLS. TLS is optional (see nginx.conf); by default this serves
+# plain HTTP for a trusted LAN / localhost deployment.
+#
+# Do not run `docker compose up` by hand for a first deploy — the dashboard image is built
+# from a PRE-BUILT Next.js standalone artifact (Dockerfile.prebuilt), so run ./deploy.sh which
+# produces that artifact first (OOM-safe), migrates the DB, seeds the operator, then starts
+# everything in the right order.
+#
+#   ./deploy.sh                 # full deploy (build + migrate + seed + up)
+#   ./deploy.sh status|health|logs|down
+#
+name: sentinel
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: sentinel-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${PGPW:?set PGPW in .env (deploy.sh generates it)}
+      POSTGRES_DB: sentinel
+    volumes:
+      - sentinel-tsdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks: [internal]
+
+  nats:
+    image: nats:2
+    container_name: sentinel-nats
+    restart: unless-stopped
+    # Token auth required: the event bus + command mesh both carry containment commands, so it
+    # must not be open to any process that can reach the network. Monitor port (8222) dropped.
+    command: ["-js", "--auth", "${NATS_TOKEN:?set NATS_TOKEN in .env}"]
+    networks: [internal]
+
+  server:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+    image: sentinel/server:local
+    container_name: sentinel-server
+    restart: unless-stopped
+    depends_on:
+      timescaledb: { condition: service_healthy }
+      nats: { condition: service_started }
+    environment:
+      # Production security gate ON (strong secrets + origin allow-list enforced). TLS is
+      # terminated by the local nginx, so BEHIND_PROXY=true waives the server-side-TLS gate.
+      SENTINEL_ENV: production
+      SENTINEL_BEHIND_PROXY: "true"
+      SENTINEL_ROLE: all
+      SENTINEL_ALLOW_ORIGINS: ${SENTINEL_HOST:?set SENTINEL_HOST in .env (e.g. http://localhost)}
+      SENTINEL_DATABASE_URL: postgres://sentinel:${PGPW}@timescaledb:5432/sentinel?sslmode=disable
+      SENTINEL_NATS_URL: nats://${NATS_TOKEN}@nats:4222
+      SENTINEL_JWT_SECRET: ${SENTINEL_JWT_SECRET:?set SENTINEL_JWT_SECRET in .env (>=32 chars)}
+      SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN:?set SENTINEL_ENROLL_TOKEN in .env}
+      SENTINEL_ADMIN_USER: ${SENTINEL_ADMIN_USER:-admin}
+      SENTINEL_ADMIN_PASS: ${SENTINEL_ADMIN_PASS:?set SENTINEL_ADMIN_PASS in .env}
+      # nginx + dashboard reach the server over the internal Docker network (private ranges).
+      SENTINEL_TRUSTED_PROXIES: 172.16.0.0/12,10.0.0.0/8,127.0.0.1/32
+      # Live threat-intel feeds (abuse.ch botnet/C2 IP blocklists — bare-IP lists, low FP).
+      # These only raise detections on a match; they never block traffic. Comment out for a
+      # fully air-gapped box.
+      SENTINEL_IOC_FEEDS: ${SENTINEL_IOC_FEEDS:-https://feodotracker.abuse.ch/downloads/ipblocklist.txt,https://sslbl.abuse.ch/blacklist/sslipblacklist.txt}
+      SENTINEL_IOC_REFRESH_MINS: "120"
+    networks: [internal]
+
+  dashboard:
+    build:
+      context: ../../dashboard
+      dockerfile: Dockerfile.prebuilt   # COPY-only; deploy.sh produces .next/standalone first
+    image: sentinel/dashboard:local
+    container_name: sentinel-dashboard
+    restart: unless-stopped
+    depends_on:
+      server: { condition: service_started }
+    environment:
+      DATABASE_URL: postgres://sentinel:${PGPW}@timescaledb:5432/sentinel?sslmode=disable
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      BETTER_AUTH_URL: ${SENTINEL_HOST}
+      GO_API: http://server:8080
+      # Service account the BFF uses to mint short-lived Go JWTs — must match the server admin.
+      GO_ADMIN_USER: ${SENTINEL_ADMIN_USER:-admin}
+      GO_ADMIN_PASS: ${SENTINEL_ADMIN_PASS}
+    networks: [internal]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: sentinel-nginx
+    restart: unless-stopped
+    depends_on:
+      server: { condition: service_started }
+      dashboard: { condition: service_started }
+    ports:
+      # Single public entry point. Override the host port with HTTP_PORT in .env.
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # Static webroot for the agent installer (/install-agent.sh) and prebuilt binaries (/dl/).
+      - ./www:/var/www/html:ro
+    networks: [internal]
+
+  # Optional demo telemetry: a scenario agent that emits synthetic EDR/DLP events so the
+  # console has data without installing on real endpoints. Enable with the `agent` profile:
+  #   ./deploy.sh --with-agent      (or: docker compose --profile agent up -d agent)
+  agent:
+    build:
+      context: ../..
+      dockerfile: agent/Dockerfile
+    image: sentinel/agent:local
+    container_name: sentinel-agent-demo
+    restart: unless-stopped
+    profiles: [agent]
+    depends_on:
+      server: { condition: service_started }
+    cap_add:
+      - NET_ADMIN
+    environment:
+      SENTINEL_SERVER: http://server:8080
+      SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN}
+    command: ["--scenario", "--interval", "5", "--labels", "local,demo"]
+    volumes:
+      - sentinel-agentstate:/var/lib/sentinel
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  sentinel-tsdata:
+  sentinel-agentstate:

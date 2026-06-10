@@ -15,6 +15,9 @@ certs/
 *.db
 *.db-*
 
+# Local deploy: nginx webroot is staged at deploy time (installer + agent binaries)
+deploy/local/www/
+
 # Release signing secrets: public keys may be committed after rotation; private keys never.
 deploy/app2/signing/*.key
 deploy/app2/signing/*.pem

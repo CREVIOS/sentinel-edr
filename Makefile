@@ -2,7 +2,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 .PHONY: help build build-web build-server build-agent test test-go test-agent test-web e2e up down logs \
-        dev-deps dev-server agent-scenario tls clean fmt
+        dev-deps dev-server agent-scenario tls clean fmt \
+        prod-help prod-deploy prod-deploy-all prod-status prod-health prod-logs prod-backup prod-rollback-list
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -66,3 +67,24 @@ fmt: ## Format Go + Rust
 
 clean: ## Remove build artifacts
 	rm -rf bin web/dist agent/target/release/sentinel-agent
+
+# ---- production (app2.makebell.com): delegates to deploy/app2/Makefile ----
+# Full target list: `make prod-help` (or `cd deploy/app2 && make help`).
+PROD := $(MAKE) --no-print-directory -C deploy/app2
+
+prod-help: ## Production: list all deploy/app2 targets
+	@$(PROD) help
+prod-deploy: ## Production: back up, build, recreate the server on app2
+	@$(PROD) deploy
+prod-deploy-all: ## Production: redeploy server + dashboard on app2
+	@$(PROD) deploy-all
+prod-status: ## Production: container status on app2
+	@$(PROD) status
+prod-health: ## Production: probe public endpoints
+	@$(PROD) health
+prod-logs: ## Production: tail server logs
+	@$(PROD) logs-server
+prod-backup: ## Production: back up env/keys + tag rollback images
+	@$(PROD) backup
+prod-rollback-list: ## Production: list server rollback image tags
+	@$(PROD) rollback-list

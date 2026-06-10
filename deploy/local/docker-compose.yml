@@ -1,5 +1,10 @@
 # Sentinel EDR — self-contained LOCAL-SERVER stack (single box, HTTP).
 #
+# REQUIRES DOCKER COMPOSE v2 (the `docker compose` plugin). Legacy docker-compose v1 (Python)
+# rejects the top-level `name:` and `profiles:` keys with
+# "name does not match any of the regexes: '^x-'".  On Ubuntu:
+#     sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+#
 # Everything runs on one internal Docker network. Only nginx publishes a host port; the
 # database, NATS, Go server, and Next.js dashboard are NOT reachable from the host directly —
 # all traffic enters through nginx, exactly like the production app2 topology but without the

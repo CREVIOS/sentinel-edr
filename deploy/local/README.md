@@ -122,8 +122,17 @@ Rebuild from the current checkout:
 ./deploy.sh --skip-build
 ```
 
+## Requirements
+
+- **Docker Compose v2** (the `docker compose` plugin — note the space). This stack uses
+  Compose-spec keys (`name:`, `profiles:`) that legacy `docker-compose` v1 cannot parse.
+  On Ubuntu: `sudo apt-get update && sudo apt-get install -y docker-compose-plugin`.
+
 ## Troubleshooting
 
+- **`name does not match any of the regexes: '^x-'`** → you're on legacy docker-compose v1.
+  Install Compose v2: `sudo apt-get install -y docker-compose-plugin`, then use `docker compose`
+  (with a space) / re-run `./deploy.sh`.
 - **`server did not report ready`** → `./deploy.sh logs server` (usually a DB/secret issue).
 - **Dashboard build fails / OOM** → the build runs out-of-band with a capped Node heap; raise
   it with `NODE_HEAP=8192 ./deploy.sh dashboard`.

@@ -52,14 +52,23 @@ die()  { printf '\033[31m✗ ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 step() { printf '\n\033[1;35m== %s ==\033[0m\n' "$*"; }
 
 # ---- docker compose detection ---------------------------------------------------------------
+# This stack uses Compose-spec keys (top-level `name:`, `profiles:`) that ONLY Docker Compose v2
+# understands. Legacy docker-compose v1 (Python, EOL) validates against an old JSON schema and
+# fails with: "name does not match any of the regexes: '^x-'". Require v2 and say how to get it.
+PROJECT="sentinel"   # fixes the network name to sentinel_internal (out-of-band steps rely on it)
 if docker compose version >/dev/null 2>&1; then
   COMPOSE=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE=(docker-compose)
+  die "found legacy docker-compose v1, which cannot parse this file (it rejects the 'name'/'profiles' keys).
+  Install Docker Compose v2, then re-run:
+      sudo apt-get update && sudo apt-get install -y docker-compose-plugin
+      docker compose version      # confirm v2.x
+  (Ubuntu: the plugin gives you the 'docker compose' subcommand — note the space, no hyphen.)"
 else
-  die "docker compose not found — install Docker Engine + the compose plugin"
+  die "Docker Compose v2 not found. Install it:
+      sudo apt-get update && sudo apt-get install -y docker-compose-plugin"
 fi
-compose() { ( cd "$HERE" && "${COMPOSE[@]}" --env-file "$ENV_FILE" "$@" ); }
+compose() { ( cd "$HERE" && "${COMPOSE[@]}" -p "$PROJECT" --env-file "$ENV_FILE" "$@" ); }
 
 # ---- .env helpers ---------------------------------------------------------------------------
 # get_val KEY — print the (trimmed) value of KEY from .env, stripping a trailing # comment.

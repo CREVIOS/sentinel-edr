@@ -5,7 +5,7 @@ import { SearchInput, matchText } from "../filters";
 import { ProcessTree } from "../ProcessTree";
 import { useStore } from "../store";
 import type { Detection, TriageResult } from "../types";
-import { Mitre, Panel, Sev, ago } from "../ui";
+import { Mitre, Panel, Sev, ago, rowClick } from "../ui";
 
 export default function Detections() {
   const { detections, events, pushToast, refreshDetections } = useStore();
@@ -109,7 +109,7 @@ export default function Detections() {
             </thead>
             <tbody>
               {rows.map((d) => (
-                <tr key={d.id} className="row-enter" onClick={() => setSel(d)} style={{ cursor: "pointer" }}>
+                <tr key={d.id} className="row-enter" {...rowClick(() => setSel(d))}>
                   <td><Sev s={d.severity} /></td>
                   <td className="mono">{d.rule_name}</td>
                   <td>{d.hostname}</td>

@@ -80,19 +80,32 @@ export function ConfirmButton({
 export function Copyable({ text, children }: { text?: string; children?: ReactNode }) {
   const [done, setDone] = useState(false);
   if (!text) return <>{children ?? "—"}</>;
+  const copy = () => {
+    navigator.clipboard?.writeText(text).then(
+      () => {
+        setDone(true);
+        setTimeout(() => setDone(false), 1200);
+      },
+      () => {}
+    );
+  };
   return (
     <span
       className="copyable"
-      title="Click to copy"
+      title="Copy to clipboard"
+      role="button"
+      tabIndex={0}
+      aria-label={`Copy ${text}`}
       onClick={(e) => {
         e.stopPropagation();
-        navigator.clipboard?.writeText(text).then(
-          () => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1200);
-          },
-          () => {}
-        );
+        copy();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          copy();
+        }
       }}
     >
       {children ?? text}

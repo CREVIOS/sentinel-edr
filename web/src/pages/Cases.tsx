@@ -4,7 +4,7 @@ import { Drawer } from "../components";
 import { SearchInput, Segmented, matchText } from "../filters";
 import { useStore } from "../store";
 import type { Case, CaseDetail } from "../types";
-import { Mitre, Panel, Sev, ago } from "../ui";
+import { Mitre, Panel, Sev, ago, rowClick } from "../ui";
 
 const STATUS_COLOR: Record<string, string> = {
   open: "var(--high)",
@@ -69,7 +69,7 @@ export default function Cases() {
               </thead>
               <tbody>
                 {rows.map((c) => (
-                  <tr key={c.id} className="row-enter" onClick={() => setSel(c)} style={{ cursor: "pointer" }}>
+                  <tr key={c.id} className="row-enter" {...rowClick(() => setSel(c))}>
                     <td><Sev s={c.severity} /></td>
                     <td className="mono">{c.title}</td>
                     <td>{c.hostname || <span className="dim">—</span>}</td>

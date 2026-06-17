@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sentinel/server/internal/ai"
 	"github.com/sentinel/server/internal/api"
 	"github.com/sentinel/server/internal/auth"
 	"github.com/sentinel/server/internal/baseline"
@@ -199,9 +200,13 @@ func main() {
 			}
 			log.Info("gateway bridge active")
 		}
+		triager := ai.New(os.Getenv("ANTHROPIC_API_KEY"), os.Getenv("SENTINEL_AI_MODEL"))
+		if triager != nil {
+			log.Info("AI triage enabled")
+		}
 		apiSrv := api.New(api.Deps{
 			Cfg: cfg, Store: st, Auth: authMgr, Hub: h, Bcast: bcast, Bus: busB,
-			Detect: det, DLP: dlpEng, Respond: resp, Tune: tuneEng, Log: log,
+			Detect: det, DLP: dlpEng, Respond: resp, Tune: tuneEng, AI: triager, Log: log,
 		})
 		srv = &http.Server{
 			Addr:              cfg.HTTPAddr,

@@ -447,6 +447,27 @@ mark.hl { background: rgba(198,255,58,0.22); color: var(--signal); border-radius
 .copy-ico { font-size: 11px; opacity: 0; color: var(--ink-faint); transition: opacity 0.12s; }
 .copyable:hover .copy-ico { opacity: 0.8; }
 
+/* ---------------- AI triage ---------------- */
+.ai-card {
+  border: 1px solid rgba(139,123,255,0.3); border-radius: 10px; padding: 13px 15px;
+  background: linear-gradient(180deg, rgba(139,123,255,0.06), rgba(139,123,255,0.02));
+}
+.ai-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }
+.ai-badge {
+  font-family: var(--mono); font-size: 10.5px; padding: 2px 8px; border-radius: 6px;
+  color: var(--violet); border: 1px solid rgba(139,123,255,0.4); background: rgba(139,123,255,0.1);
+}
+.ai-summary { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+.ai-label {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 10px 0 5px;
+}
+.ai-text { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-dim); }
+.ai-actions { margin: 0; padding-left: 18px; }
+.ai-actions li { font-size: 12.5px; line-height: 1.6; color: var(--ink); }
+.ai-foot { font-size: 10.5px; margin-top: 11px; }
+.ai-err { font-size: 12px; color: var(--crit); font-family: var(--mono); }
+
 /* ---------------- process tree ---------------- */
 .proc-tree-wrap { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--bg-2); }
 .proc-tree-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }

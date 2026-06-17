@@ -323,11 +323,7 @@ const WARN_COOLDOWN: Duration = Duration::from_secs(30);
 /// Keys off the labels `annotate_enforcement` stamps, so it only triggers when enforcement
 /// actually intercepted something (a drive used while blocked, an upload dropped).
 fn maybe_warn_user(batch: &[event::Event], st: &mut WarnState) {
-    let has = |label: &str| {
-        batch
-            .iter()
-            .any(|e| e.labels.iter().any(|l| l == label))
-    };
+    let has = |label: &str| batch.iter().any(|e| e.labels.iter().any(|l| l == label));
     let now = std::time::Instant::now();
     let due = |last: &Option<std::time::Instant>| {
         last.map_or(true, |t| now.duration_since(t) >= WARN_COOLDOWN)

@@ -1,0 +1,2 @@
+# Keeps the Next.js public/ directory present in git so Dockerfile.prebuilt's
+# `COPY public ./public` succeeds even when the app ships no static assets.

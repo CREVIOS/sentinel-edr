@@ -7,6 +7,7 @@ import Overview from "./pages/Overview";
 import Endpoints from "./pages/Endpoints";
 import Events from "./pages/Events";
 import Detections from "./pages/Detections";
+import Cases from "./pages/Cases";
 import Dlp from "./pages/Dlp";
 import Internet from "./pages/Internet";
 import Responses from "./pages/Responses";
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/endpoints" element={<Endpoints />} />
           <Route path="/events" element={<Events />} />
           <Route path="/detections" element={<Detections />} />
+          <Route path="/cases" element={<Cases />} />
           <Route path="/dlp" element={<Dlp />} />
           <Route path="/internet" element={<Internet />} />
           <Route path="/responses" element={<Responses />} />

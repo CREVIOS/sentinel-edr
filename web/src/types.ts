@@ -8,6 +8,9 @@ export interface Process {
   cmdline?: string;
   user?: string;
   parent?: string;
+  lineage?: string;
+  container?: string;
+  hash?: string;
 }
 export interface FileInfo {
   path?: string;
@@ -111,6 +114,30 @@ export interface ResponseAction {
   status: string;
   result?: string;
   automated: boolean;
+}
+export type CaseStatus = "open" | "investigating" | "contained" | "closed";
+export interface CaseNote {
+  ts: string;
+  author: string;
+  body: string;
+}
+export interface Case {
+  id: string;
+  title: string;
+  severity: Severity;
+  status: CaseStatus;
+  assigned_to?: string;
+  agent_id?: string;
+  hostname?: string;
+  detection_ids: string[];
+  mitre?: string[];
+  notes?: CaseNote[];
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+}
+export interface CaseDetail extends Case {
+  detections: Detection[];
 }
 export interface Rule {
   ID: string;

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { getToken } from "./api";
 
 export interface LiveMessage {
-  type: "event" | "detection" | "response" | "agent" | "stats";
+  type: "event" | "detection" | "response" | "agent" | "stats" | "case";
   data: any;
 }
 

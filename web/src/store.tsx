@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "./api";
-import type { Agent, Detection, Event, Overview, ResponseAction } from "./types";
+import type { Agent, Case, Detection, Event, Overview, ResponseAction } from "./types";
 import { useLiveFeed } from "./ws";
 
 interface Toast {
@@ -16,11 +16,13 @@ interface StoreState {
   events: Event[];
   detections: Detection[];
   responses: ResponseAction[];
+  cases: Case[];
   toasts: Toast[];
   refreshOverview: () => void;
   refreshAgents: () => void;
   refreshDetections: () => void;
   refreshResponses: () => void;
+  refreshCases: () => void;
   pushToast: (text: string, crit?: boolean) => void;
   dismissToast: (id: string) => void;
 }
@@ -36,6 +38,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<Event[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [responses, setResponses] = useState<ResponseAction[]>([]);
+  const [cases, setCases] = useState<Case[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seenDet = useRef<Set<string>>(new Set());
 
@@ -44,6 +47,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const refreshDetections = () =>
     api.detections({ limit: "200" }).then((d) => setDetections(d || [])).catch(() => {});
   const refreshResponses = () => api.responses().then((r) => setResponses(r || [])).catch(() => {});
+  const refreshCases = () => api.cases({ limit: "200" }).then((c) => setCases(c || [])).catch(() => {});
 
   const dismissToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
   const pushToast = (text: string, crit?: boolean) => {
@@ -57,6 +61,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshAgents();
     refreshDetections();
     refreshResponses();
+    refreshCases();
     api.events({ limit: "200" }).then((e) => setEvents(e || [])).catch(() => {});
     const t = setInterval(() => {
       refreshOverview();
@@ -90,6 +95,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const without = prev.filter((x) => x.id !== a.id);
         return [...without, a].sort((x, y) => x.hostname.localeCompare(y.hostname));
       });
+    } else if (m.type === "case") {
+      const c = m.data as Case;
+      setCases((prev) => [c, ...prev.filter((x) => x.id !== c.id)]);
     }
   });
 
@@ -100,11 +108,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     events,
     detections,
     responses,
+    cases,
     toasts,
     refreshOverview,
     refreshAgents,
     refreshDetections,
     refreshResponses,
+    refreshCases,
     pushToast,
     dismissToast,
   };

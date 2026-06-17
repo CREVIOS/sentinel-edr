@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Drawer, KV } from "../components";
+import { ProcessTree } from "../ProcessTree";
 import { useStore } from "../store";
 import type { Event } from "../types";
 import { CAT_ICON, Panel, Sev, bytes, shortTime } from "../ui";
@@ -8,6 +9,7 @@ const CATS = ["", "process", "file", "network", "auth", "ssh", "usb", "package",
 const SEVS = ["", "critical", "high", "medium", "low", "info"];
 
 export function EventDrawer({ e, onClose }: { e: Event; onClose: () => void }) {
+  const { events } = useStore();
   const items: [string, any][] = [
     ["Time", new Date(e.ts).toLocaleString()],
     ["Severity", <Sev s={e.severity} />],
@@ -54,6 +56,11 @@ export function EventDrawer({ e, onClose }: { e: Event; onClose: () => void }) {
   return (
     <Drawer title={`${e.category} · ${e.action}`} sub="event detail" onClose={onClose}>
       <KV items={items} />
+      {e.process?.pid ? (
+        <div style={{ marginTop: 18 }}>
+          <ProcessTree event={e} events={events} />
+        </div>
+      ) : null}
     </Drawer>
   );
 }

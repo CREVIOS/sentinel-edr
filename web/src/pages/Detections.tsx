@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { api, getRole } from "../api";
 import { ConfirmButton, Copyable, Drawer, KV } from "../components";
 import { SearchInput, matchText } from "../filters";
+import { ProcessTree } from "../ProcessTree";
 import { useStore } from "../store";
 import type { Detection } from "../types";
 import { Mitre, Panel, Sev, ago } from "../ui";
@@ -29,6 +30,14 @@ export default function Detections() {
     const id = d.event_ids?.[0];
     const ev = events.find((e) => e.id === id);
     return ev?.process?.pid;
+  };
+
+  const relatedEvent = (d: Detection) => {
+    for (const id of d.event_ids || []) {
+      const ev = events.find((e) => e.id === id);
+      if (ev?.process?.pid) return ev;
+    }
+    return undefined;
   };
 
   const setStat = async (d: Detection, s: string) => {
@@ -134,6 +143,14 @@ export default function Detections() {
               ["Events", <span className="mono dim">{(sel.event_ids || []).join(", ")}</span>],
             ]}
           />
+          {(() => {
+            const re = relatedEvent(sel);
+            return re ? (
+              <div style={{ marginTop: 18 }}>
+                <ProcessTree event={re} events={events} />
+              </div>
+            ) : null;
+          })()}
         </Drawer>
       )}
     </>

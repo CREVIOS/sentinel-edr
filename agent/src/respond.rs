@@ -627,13 +627,17 @@ impl Responder {
         }
         #[cfg(target_os = "linux")]
         {
-            // 1. persistent, storage-class-only override
+            // 1. persistent, storage-class-only override. BEST-EFFORT: under systemd
+            //    ProtectSystem=full, /etc is read-only to the agent — the write then fails,
+            //    but that must NOT abort the block. Runtime enforcement (steps 2+3) is what
+            //    actually stops exfil; losing the modprobe.d file only costs persistence
+            //    across reboot. (The unit ships /etc/modprobe.d in ReadWritePaths so a normal
+            //    install keeps persistence; this guard just degrades gracefully without it.)
             let conf = "# Managed by Sentinel EDR — block USB mass storage (storage class only).\n\
                         # HID (keyboard/mouse) and Bluetooth are intentionally NOT blocked.\n\
                         install usb_storage /bin/true\n\
                         install uas /bin/true\n";
-            std::fs::write(USB_BLOCK_CONF, conf)
-                .map_err(|e| format!("write {USB_BLOCK_CONF}: {e}"))?;
+            let persistent = std::fs::write(USB_BLOCK_CONF, conf).is_ok();
 
             // 2. best-effort live unload (uas first — it depends on usb_storage)
             let _ = Command::new("modprobe").arg("-r").arg("uas").output();
@@ -660,7 +664,12 @@ impl Responder {
             }
             self.flags.usb_blocked.store(true, Ordering::SeqCst);
             Ok(format!(
-                "USB mass storage blocked (persistent modprobe override{}; {deauthorized} attached device(s) deauthorized) — HID/Bluetooth unaffected",
+                "USB mass storage blocked ({}; {deauthorized} attached device(s) deauthorized{}) — HID/Bluetooth unaffected",
+                if persistent {
+                    "persistent modprobe override"
+                } else {
+                    "runtime only — /etc read-only, persistence skipped"
+                },
                 if module_gone { ", driver unloaded" } else { "" }
             ))
         }
@@ -675,14 +684,10 @@ impl Responder {
     fn unblock_usb(&self) -> Result<String, String> {
         #[cfg(target_os = "linux")]
         {
-            // 1. remove the persistent override so the driver can load again
-            std::fs::remove_file(USB_BLOCK_CONF).or_else(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    Ok(())
-                } else {
-                    Err(format!("remove {USB_BLOCK_CONF}: {e}"))
-                }
-            })?;
+            // 1. remove the persistent override so the driver can load again. Best-effort:
+            //    absent (never written) or /etc read-only both just mean nothing to undo here;
+            //    the runtime re-authorize + module reload below are what restore USB storage.
+            let _ = std::fs::remove_file(USB_BLOCK_CONF);
             // 2. re-authorize any device we deauthorized (kernel re-probes & rebinds)
             let reauthorized = reauthorize_usb_devices();
             // 3. reload the mass-storage drivers (no-op/harmless if built into the kernel)

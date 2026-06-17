@@ -595,3 +595,34 @@ mark.hl { background: rgba(198,255,58,0.22); color: var(--signal); border-radius
   .content { padding: 18px 14px 48px; }
   .clock, .page-kicker { display: none; }
 }
+
+/* ---------------- accessibility ---------------- */
+/* Visible keyboard focus everywhere interactive — only on keyboard nav, not mouse clicks. */
+.btn:focus-visible,
+.nav-item:focus-visible,
+.seg-item:focus-visible,
+.search-clear:focus-visible,
+.toast-close:focus-visible,
+.copyable:focus-visible,
+.th-sort:focus-visible,
+.proc-node:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+.input:focus-visible { outline: none; } /* inputs already show a focus ring via border + shadow */
+/* Clickable table rows (rowClick helper sets role="button") */
+.table tbody tr[role="button"]:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: -2px;
+}
+
+/* Respect users who ask for reduced motion — disable reveal/row-enter/card animations. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

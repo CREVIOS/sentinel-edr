@@ -4,7 +4,7 @@ import { ConfirmButton, Copyable, Drawer, KV } from "../components";
 import { SearchInput, Segmented, SortHeader, matchText, useTableSort } from "../filters";
 import { useStore } from "../store";
 import type { Agent } from "../types";
-import { Panel, StatusTag, ago } from "../ui";
+import { Panel, StatusTag, ago, rowClick } from "../ui";
 
 export default function Endpoints() {
   const { agents, pushToast, refreshAgents } = useStore();
@@ -79,7 +79,7 @@ export default function Endpoints() {
               </thead>
               <tbody>
                 {rows.map((a) => (
-                  <tr key={a.id} onClick={() => setSel(a)} style={{ cursor: "pointer" }}>
+                  <tr key={a.id} {...rowClick(() => setSel(a))}>
                     <td><StatusTag s={a.status} /></td>
                     <td className="mono">{hl(a.hostname, q)}</td>
                     <td>{a.os || "—"} <span className="dim">{a.kernel}</span></td>

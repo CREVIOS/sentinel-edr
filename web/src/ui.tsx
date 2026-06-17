@@ -1,5 +1,25 @@
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import type { Severity } from "./types";
+
+/**
+ * Props that make a non-button element (e.g. a clickable table row) operable by keyboard:
+ * focusable, activatable with Enter/Space, and announced as a button to assistive tech.
+ * Spread onto the element: `<tr {...rowClick(() => open(x))}>`.
+ */
+export function rowClick(onActivate: () => void) {
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    onClick: onActivate,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+    style: { cursor: "pointer" as const },
+  };
+}
 
 export function Sev({ s }: { s: Severity | string }) {
   const c = `sev sev-${s}`;

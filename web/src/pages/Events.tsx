@@ -3,7 +3,7 @@ import { Drawer, KV } from "../components";
 import { ProcessTree } from "../ProcessTree";
 import { useStore } from "../store";
 import type { Event } from "../types";
-import { CAT_ICON, Panel, Sev, bytes, shortTime } from "../ui";
+import { CAT_ICON, Panel, Sev, bytes, rowClick, shortTime } from "../ui";
 
 const CATS = ["", "process", "file", "network", "auth", "ssh", "usb", "package", "dlp", "system"];
 const SEVS = ["", "critical", "high", "medium", "low", "info"];
@@ -122,7 +122,7 @@ export default function Events() {
             </thead>
             <tbody>
               {rows.slice(0, 250).map((e) => (
-                <tr key={e.id} className="row-enter" onClick={() => setSel(e)} style={{ cursor: "pointer" }}>
+                <tr key={e.id} className="row-enter" {...rowClick(() => setSel(e))}>
                   <td className="mono dim">{shortTime(e.ts)}</td>
                   <td><Sev s={e.severity} /></td>
                   <td title={e.category}>{CAT_ICON[e.category] || "•"} <span className="dim">{e.action}</span></td>

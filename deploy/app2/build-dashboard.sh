@@ -56,6 +56,9 @@ docker run --rm --network "$NET" -e DATABASE_URL="$DBURL" -e BETTER_AUTH_SECRET=
   bash -c 'corepack enable && pnpm dlx @better-auth/cli@latest migrate -y'
 
 echo "==> [3/4] building COPY-only runtime image"
+# Dockerfile.prebuilt does `COPY public ./public`; ensure the dir exists so the build never
+# fails on an app that ships no static assets (an empty public/ is valid for Next standalone).
+mkdir -p "$DASH/public"
 docker build -f "$DASH/Dockerfile.prebuilt" -t sentinel/dashboard:app2 "$DASH"
 
 echo "==> [4/4] recreating dashboard container"

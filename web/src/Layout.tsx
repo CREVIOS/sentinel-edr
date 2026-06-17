@@ -8,6 +8,7 @@ const NAV = [
   { to: "/endpoints", icon: "⛂", label: "Endpoints" },
   { to: "/events", icon: "≡", label: "Event Stream" },
   { to: "/detections", icon: "⚠", label: "Detections", section: "Threat" },
+  { to: "/cases", icon: "▤", label: "Cases" },
   { to: "/dlp", icon: "✦", label: "Data Loss (DLP)" },
   { to: "/internet", icon: "◈", label: "Internet / Web" },
   { to: "/responses", icon: "⊘", label: "Response", section: "Control" },
@@ -16,8 +17,9 @@ const NAV = [
 ];
 
 export default function Layout({ children, onLogout }: { children: ReactNode; onLogout: () => void }) {
-  const { connected, detections, toasts, dismissToast } = useStore();
+  const { connected, detections, cases, toasts, dismissToast } = useStore();
   const openCrit = detections.filter((d) => d.status === "open" && (d.severity === "critical" || d.severity === "high")).length;
+  const openCases = cases.filter((c) => c.status !== "closed").length;
   const user = getUser() || "operator";
   const role = getRole() || "viewer";
   const [now, setNow] = useState(new Date());
@@ -61,6 +63,7 @@ export default function Layout({ children, onLogout }: { children: ReactNode; on
                 <span className="ico">{n.icon}</span>
                 {n.label}
                 {n.to === "/detections" && openCrit > 0 && <span className="nav-badge">{openCrit}</span>}
+                {n.to === "/cases" && openCases > 0 && <span className="nav-badge">{openCases}</span>}
               </NavLink>
             </div>
           ))}

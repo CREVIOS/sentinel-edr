@@ -1,7 +1,7 @@
 // Thin API client. All URLs are relative so the same build works behind the Vite dev
 // proxy and when served from the Go server in production.
 
-import type { Agent, Detection, Event, Overview, ResponseAction, Rule } from "./types";
+import type { Agent, Case, CaseDetail, Detection, Event, Overview, ResponseAction, Rule } from "./types";
 
 const USER_KEY = "sentinel_user";
 const ROLE_KEY = "sentinel_role";
@@ -80,4 +80,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  cases: (q: Record<string, string> = {}) =>
+    req<Case[]>("/api/v1/cases?" + new URLSearchParams(q).toString()),
+  caseDetail: (id: string) => req<CaseDetail>(`/api/v1/cases/${id}`),
+  createCase: (body: { title: string; severity?: string; agent_id?: string; hostname?: string; detection_ids?: string[] }) =>
+    req<Case>("/api/v1/cases", { method: "POST", body: JSON.stringify(body) }),
+  updateCase: (id: string, body: { status?: string; assigned_to?: string; title?: string }) =>
+    req<Case>(`/api/v1/cases/${id}`, { method: "POST", body: JSON.stringify(body) }),
+  addCaseNote: (id: string, body: string) =>
+    req<Case>(`/api/v1/cases/${id}/notes`, { method: "POST", body: JSON.stringify({ body }) }),
 };

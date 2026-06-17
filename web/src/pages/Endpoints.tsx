@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { api, getRole } from "../api";
-import { Drawer, KV } from "../components";
+import { ConfirmButton, Copyable, Drawer, KV } from "../components";
 import { SearchInput, Segmented, SortHeader, matchText, useTableSort } from "../filters";
 import { useStore } from "../store";
 import type { Agent } from "../types";
@@ -106,25 +106,25 @@ export default function Endpoints() {
             canAct && (
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {sel.status !== "isolated" ? (
-                  <button className="btn btn-danger" onClick={() => act(sel, "isolate")}>⊘ Isolate Endpoint</button>
+                  <ConfirmButton className="btn btn-danger" confirmLabel="Isolate" onConfirm={() => act(sel, "isolate")}>⊘ Isolate Endpoint</ConfirmButton>
                 ) : (
                   <button className="btn btn-primary" onClick={() => act(sel, "unisolate")}>↺ Lift Isolation</button>
                 )}
-                <button className="btn" onClick={() => act(sel, "block_usb")}>⛁ Block USB</button>
-                <button className="btn" onClick={() => act(sel, "block_upload")}>◈ Block Uploads</button>
+                <ConfirmButton className="btn" confirmLabel="Block USB" onConfirm={() => act(sel, "block_usb")}>⛁ Block USB</ConfirmButton>
+                <ConfirmButton className="btn" confirmLabel="Block Uploads" onConfirm={() => act(sel, "block_upload")}>◈ Block Uploads</ConfirmButton>
               </div>
             )
           }
         >
           <KV
             items={[
-              ["Agent ID", <span className="mono">{sel.id}</span>],
+              ["Agent ID", <Copyable text={sel.id}><span className="mono">{sel.id}</span></Copyable>],
               ["Status", <StatusTag s={sel.status} />],
               ["Operating System", sel.os],
               ["Kernel", <span className="mono">{sel.kernel}</span>],
               ["Architecture", <span className="chip">{sel.arch}</span>],
-              ["IP Address", <span className="mono">{sel.ip}</span>],
-              ["MAC Address", <span className="mono">{sel.mac}</span>],
+              ["IP Address", <Copyable text={sel.ip}><span className="mono">{sel.ip}</span></Copyable>],
+              ["MAC Address", <Copyable text={sel.mac}><span className="mono">{sel.mac}</span></Copyable>],
               ["Agent Version", sel.version],
               ["Labels", (sel.labels || []).map((l) => <span key={l} className="chip lime" style={{ marginRight: 5 }}>{l}</span>)],
               ["Events Reported", sel.event_count?.toLocaleString?.()],

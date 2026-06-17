@@ -16,7 +16,7 @@ const NAV = [
 ];
 
 export default function Layout({ children, onLogout }: { children: ReactNode; onLogout: () => void }) {
-  const { connected, detections, toasts } = useStore();
+  const { connected, detections, toasts, dismissToast } = useStore();
   const openCrit = detections.filter((d) => d.status === "open" && (d.severity === "critical" || d.severity === "high")).length;
   const user = getUser() || "operator";
   const role = getRole() || "viewer";
@@ -24,6 +24,22 @@ export default function Layout({ children, onLogout }: { children: ReactNode; on
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // Press "/" anywhere (outside a field) to jump to the page's filter box.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement;
+      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      const box = document.querySelector<HTMLInputElement>(".content .search-input, .content input.input");
+      if (box) {
+        e.preventDefault();
+        box.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
@@ -63,7 +79,10 @@ export default function Layout({ children, onLogout }: { children: ReactNode; on
         {toasts.map((t) => (
           <div key={t.id} className={`toast${t.crit ? " crit" : ""}`}>
             <span className="dot on" />
-            {t.text}
+            <span style={{ flex: 1 }}>{t.text}</span>
+            <button className="toast-close" onClick={() => dismissToast(t.id)} title="Dismiss" aria-label="Dismiss">
+              ✕
+            </button>
           </div>
         ))}
       </div>

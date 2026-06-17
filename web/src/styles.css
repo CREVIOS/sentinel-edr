@@ -441,6 +441,20 @@ body {
 /* ---------------- filter match highlight ---------------- */
 mark.hl { background: rgba(198,255,58,0.22); color: var(--signal); border-radius: 3px; padding: 0 1px; }
 
+/* ---------------- click-to-copy ---------------- */
+.copyable { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 4px; transition: 0.12s; }
+.copyable:hover { color: var(--cyan); }
+.copy-ico { font-size: 11px; opacity: 0; color: var(--ink-faint); transition: opacity 0.12s; }
+.copyable:hover .copy-ico { opacity: 0.8; }
+
+/* ---------------- toast dismiss ---------------- */
+.toast { display: flex; align-items: center; gap: 9px; }
+.toast-close {
+  border: none; background: transparent; color: var(--ink-faint); cursor: pointer;
+  font-size: 11px; padding: 2px 4px; border-radius: 5px; transition: 0.12s;
+}
+.toast-close:hover { color: var(--ink); background: rgba(255,255,255,0.06); }
+
 /* ---------------- login ---------------- */
 .login-wrap {
   position: relative; z-index: 1;

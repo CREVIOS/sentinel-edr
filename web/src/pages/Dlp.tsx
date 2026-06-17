@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { SearchInput, matchText } from "../filters";
 import { useStore } from "../store";
 import { Panel, Sev, Stat, ago } from "../ui";
 
 export default function Dlp() {
   const { events } = useStore();
+  const [q, setQ] = useState("");
   const [classifiers, setClassifiers] = useState<{ name: string; label: string; severity: string }[]>([]);
   const [policies, setPolicies] = useState<{ Classifier: string; Channel: string; Verdict: string }[]>([]);
 
@@ -13,27 +15,35 @@ export default function Dlp() {
     api.dlpPolicies().then(setPolicies).catch(() => {});
   }, []);
 
-  const dlpEvents = useMemo(() => events.filter((e) => e.category === "dlp" || e.dlp), [events]);
+  const allDlp = useMemo(() => events.filter((e) => e.category === "dlp" || e.dlp), [events]);
+  const dlpEvents = useMemo(
+    () => allDlp.filter((e) => matchText(q, e.hostname, e.user, e.dlp?.classifier, e.dlp?.channel, e.dlp?.sample, e.dlp?.verdict)),
+    [allDlp, q]
+  );
   const byClass = useMemo(() => {
     const m: Record<string, number> = {};
-    dlpEvents.forEach((e) => {
+    allDlp.forEach((e) => {
       const c = e.dlp?.classifier || "unknown";
       m[c] = (m[c] || 0) + 1;
     });
     return m;
-  }, [dlpEvents]);
-  const blocked = dlpEvents.filter((e) => e.dlp?.verdict === "block").length;
+  }, [allDlp]);
+  const blocked = allDlp.filter((e) => e.dlp?.verdict === "block").length;
 
   return (
     <div className="grid" style={{ gap: 18 }}>
       <div className="grid cols-4">
-        <Stat label="DLP Incidents" value={dlpEvents.length} accent="#8b7bff" foot={<span>live session</span>} />
+        <Stat label="DLP Incidents" value={allDlp.length} accent="#8b7bff" foot={<span>live session</span>} />
         <Stat label="Blocked Transfers" value={blocked} crit={blocked > 0} foot={<span>policy enforced</span>} />
         <Stat label="Classifiers" value={classifiers.length} accent="#34e3d4" foot={<span>active patterns</span>} />
         <Stat label="Policies" value={policies.length} accent="#c6ff3a" foot={<span>channel rules</span>} />
       </div>
 
-      <Panel title="DLP INCIDENTS" sub="sensitive data movement">
+      <Panel
+        title="DLP INCIDENTS"
+        sub="sensitive data movement"
+        right={<SearchInput value={q} onChange={setQ} placeholder="Filter by host, user, classifier, channel…" width={300} />}
+      >
         <div className="table-wrap scroll">
           <table className="table">
             <thead>

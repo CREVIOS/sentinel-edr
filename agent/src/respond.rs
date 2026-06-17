@@ -557,13 +557,26 @@ impl Responder {
             let server_allow = validated_ip(&self.server_host)
                 .map(|ip| format!("    ip daddr {ip} accept\n"))
                 .unwrap_or_default();
+            // Drop NEW outbound exfil channels while keeping the box usable (DNS + the Sentinel
+            // server + already-established flows stay up). Critically this also drops UDP/443:
+            // without it, HTTP/3 (QUIC) lets every modern browser upload straight past a
+            // TCP-only DLP rule. TCP set covers web, FTP, SCP/SFTP (22), SMB (445), mail
+            // submission (465/587/993/995), NFS (2049), and common alt-HTTP ports.
             let ruleset = format!(
-                "table inet sentinel_dlp {{\n  chain output {{ type filter hook output priority -2; policy accept;\n    oif \"lo\" accept\n{server_allow}    ct state established,related accept\n    udp dport 53 accept\n    tcp dport {{ 80, 443, 21, 8080, 2049 }} ct state new drop\n  }}\n}}\n"
+                "table inet sentinel_dlp {{\n  \
+                 chain output {{ type filter hook output priority -2; policy accept;\n    \
+                 oif \"lo\" accept\n\
+                 {server_allow}    \
+                 ct state established,related accept\n    \
+                 udp dport 53 accept\n    \
+                 udp dport {{ 80, 443 }} drop\n    \
+                 tcp dport {{ 20, 21, 22, 80, 443, 445, 465, 587, 993, 995, 2049, 8080, 8443 }} ct state new drop\n  \
+                 }}\n}}\n"
             );
             apply_nft(&ruleset, "sentinel-dlp.nft")?;
             verify_nft_table("sentinel_dlp")?;
             self.flags.upload_blocked.store(true, Ordering::SeqCst);
-            Ok("outbound upload channels blocked (new web/ftp/nfs egress dropped)".into())
+            Ok("outbound upload channels blocked (new web/QUIC/ftp/scp/smb/mail/nfs egress dropped)".into())
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -594,38 +607,64 @@ impl Responder {
         }
     }
 
-    // -------- block USB mass storage --------
+    // -------- block USB mass storage (storage class only) --------
+    // Targets ONLY the USB mass-storage interface class (0x08). USB HID (mouse/keyboard,
+    // class 0x03) and wireless/Bluetooth controllers (class 0xe0) are deliberately left
+    // authorized, so blocking exfil never bricks input devices or locks an admin out.
+    // We do NOT use USBGuard's `ImplicitPolicyTarget block` — that denies *every* class
+    // not whitelisted and would kill keyboards/Bluetooth on the next plug.
+    //
+    // Three storage-scoped layers, applied together and then verified:
+    //   1. Persistent modprobe override (`install … /bin/true`) so the driver stays out
+    //      across reboots and indirect/udev auto-loads (stronger than `blacklist`).
+    //   2. Live `modprobe -r` of uas + usb_storage (uas depends on usb_storage → remove first).
+    //   3. sysfs deauthorization of already-connected storage devices — unbinds the driver
+    //      INSTANTLY even when the module is busy (a mounted drive), which `modprobe -r`
+    //      cannot. Per-device + class-filtered, so non-storage interfaces are untouched.
     fn block_usb(&self) -> Result<String, String> {
         if !self.enforce() {
             return Err("usb block disabled by policy (--enforce=false)".into());
         }
         #[cfg(target_os = "linux")]
         {
-            // Prefer USBGuard if installed; else unload the mass-storage kernel modules.
-            if which("usbguard") {
-                let out = Command::new("usbguard")
-                    .args(["set-parameter", "ImplicitPolicyTarget", "block"])
-                    .output();
-                if let Ok(o) = out {
-                    if o.status.success() {
-                        self.flags.usb_blocked.store(true, Ordering::SeqCst);
-                        return Ok("USBGuard implicit policy set to block".into());
-                    }
+            // 1. persistent, storage-class-only override
+            let conf = "# Managed by Sentinel EDR — block USB mass storage (storage class only).\n\
+                        # HID (keyboard/mouse) and Bluetooth are intentionally NOT blocked.\n\
+                        install usb_storage /bin/true\n\
+                        install uas /bin/true\n";
+            std::fs::write(USB_BLOCK_CONF, conf)
+                .map_err(|e| format!("write {USB_BLOCK_CONF}: {e}"))?;
+
+            // 2. best-effort live unload (uas first — it depends on usb_storage)
+            let _ = Command::new("modprobe").arg("-r").arg("uas").output();
+            let _ = Command::new("modprobe").arg("-r").arg("usb_storage").output();
+
+            // 3. deauthorize already-attached storage devices via sysfs (works while busy)
+            let mut deauthorized = 0usize;
+            for dev in usb_mass_storage_devices() {
+                if std::fs::write(dev.join("authorized"), "0").is_ok() {
+                    deauthorized += 1;
                 }
             }
-            for module in ["usb_storage", "uas"] {
-                let _ = Command::new("modprobe").arg("-r").arg(module).output();
-            }
-            if module_loaded("usb_storage") {
-                return Err("failed to unload usb_storage (device busy?)".into());
+
+            // verify: enforced if the driver is gone OR no storage device remains bound.
+            let module_gone = !module_loaded("usb_storage");
+            let still_bound = usb_mass_storage_devices().len();
+            if !module_gone && still_bound > 0 {
+                return Err(format!(
+                    "usb_storage still active: module loaded and {still_bound} storage device(s) still bound (deauthorization failed — need CAP_SYS_ADMIN and writable /sys)"
+                ));
             }
             self.flags.usb_blocked.store(true, Ordering::SeqCst);
-            Ok("USB mass-storage modules unloaded; new removable media blocked".into())
+            Ok(format!(
+                "USB mass storage blocked (persistent modprobe override{}; {deauthorized} attached device(s) deauthorized) — HID/Bluetooth unaffected",
+                if module_gone { ", driver unloaded" } else { "" }
+            ))
         }
         #[cfg(not(target_os = "linux"))]
         {
             // Do NOT set the flag — nothing is actually blocked on this platform.
-            Err("USB enforcement requires Linux (USBGuard/modprobe)".into())
+            Err("USB enforcement requires Linux (modprobe/sysfs)".into())
         }
     }
 
@@ -633,27 +672,24 @@ impl Responder {
     fn unblock_usb(&self) -> Result<String, String> {
         #[cfg(target_os = "linux")]
         {
-            // Mirror block_usb: if USBGuard drove the block, relax its implicit policy; otherwise
-            // reload the mass-storage modules we unloaded.
-            if which("usbguard") {
-                let out = Command::new("usbguard")
-                    .args(["set-parameter", "ImplicitPolicyTarget", "allow"])
-                    .output();
-                if let Ok(o) = out {
-                    if o.status.success() {
-                        self.flags.usb_blocked.store(false, Ordering::SeqCst);
-                        return Ok("USBGuard implicit policy set to allow".into());
+            // 1. remove the persistent override so the driver can load again
+            std::fs::remove_file(USB_BLOCK_CONF)
+                .or_else(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(format!("remove {USB_BLOCK_CONF}: {e}"))
                     }
-                }
-            }
-            for module in ["usb_storage", "uas"] {
-                let _ = Command::new("modprobe").arg(module).output();
-            }
-            if !module_loaded("usb_storage") {
-                return Err("failed to reload usb_storage module".into());
-            }
+                })?;
+            // 2. re-authorize any device we deauthorized (kernel re-probes & rebinds)
+            let reauthorized = reauthorize_usb_devices();
+            // 3. reload the mass-storage drivers (no-op/harmless if built into the kernel)
+            let _ = Command::new("modprobe").arg("usb_storage").output();
+            let _ = Command::new("modprobe").arg("uas").output();
             self.flags.usb_blocked.store(false, Ordering::SeqCst);
-            Ok("USB mass-storage modules reloaded; removable media allowed".into())
+            Ok(format!(
+                "USB mass-storage block lifted (override removed, {reauthorized} device(s) re-authorized, drivers reloaded)"
+            ))
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -807,14 +843,64 @@ fn module_loaded(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Persistent modprobe override that keeps the USB mass-storage drivers from loading.
 #[cfg(target_os = "linux")]
-fn which(bin: &str) -> bool {
-    if bin.contains('/') {
-        return std::path::Path::new(bin).is_file();
+const USB_BLOCK_CONF: &str = "/etc/modprobe.d/sentinel-usb-block.conf";
+
+/// Device dirs under /sys/bus/usb/devices that currently expose a USB mass-storage
+/// interface (bInterfaceClass == 08). Interface dirs are named "<dev>:<cfg>.<intf>"
+/// (they contain a ':'); the parent device dir has no ':'. We map a matching interface
+/// back to its device so deauthorizing it unbinds storage without touching HID/BT.
+#[cfg(target_os = "linux")]
+fn usb_mass_storage_devices() -> Vec<std::path::PathBuf> {
+    let base = std::path::Path::new("/sys/bus/usb/devices");
+    let mut devs: Vec<std::path::PathBuf> = Vec::new();
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return devs;
+    };
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        // only interface dirs carry bInterfaceClass; they look like "1-1:1.0"
+        let Some((dev, _)) = name.split_once(':') else {
+            continue;
+        };
+        let class = std::fs::read_to_string(entry.path().join("bInterfaceClass")).unwrap_or_default();
+        if class.trim().eq_ignore_ascii_case("08") {
+            let p = base.join(dev);
+            if !devs.contains(&p) {
+                devs.push(p);
+            }
+        }
     }
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|p| p.join(bin).is_file()))
-        .unwrap_or(false)
+    devs
+}
+
+/// Re-authorize every USB device left deauthorized (authorized == 0). Called on unblock;
+/// after a deauthorization the device's interface children are gone, so we can no longer
+/// read the class — we re-authorize any deauthorized device and let the kernel re-probe.
+#[cfg(target_os = "linux")]
+fn reauthorize_usb_devices() -> usize {
+    let base = std::path::Path::new("/sys/bus/usb/devices");
+    let mut n = 0usize;
+    let Ok(rd) = std::fs::read_dir(base) else {
+        return 0;
+    };
+    for entry in rd.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.contains(':') {
+            continue; // skip interface dirs; act on device dirs only
+        }
+        let af = entry.path().join("authorized");
+        let deauthorized = std::fs::read_to_string(&af)
+            .map(|s| s.trim() == "0")
+            .unwrap_or(false);
+        if deauthorized && std::fs::write(&af, "1").is_ok() {
+            n += 1;
+        }
+    }
+    n
 }
 
 /// Resolve a pid's cgroup-v2 directory under /sys/fs/cgroup (for cgroup.kill/freeze).

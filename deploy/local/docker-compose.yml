@@ -128,8 +128,11 @@ services:
     profiles: [agent]
     depends_on:
       server: { condition: service_started }
+    # NET_ADMIN: nftables isolation/upload-block. SYS_MODULE: USB mass-storage unload.
+    # Full USB control (sysfs deauthorize) needs a writable host /sys — host agent only.
     cap_add:
       - NET_ADMIN
+      - SYS_MODULE
     environment:
       SENTINEL_SERVER: http://server:8080
       SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN}

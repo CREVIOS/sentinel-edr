@@ -17,6 +17,22 @@ use std::time::Duration;
 
 const OBJECT_PATH: &str = "/usr/lib/sentinel/sentinel.bpf.o";
 
+/// bpffs directory the agent pins its policy maps + LSM links into, so enforcement survives the
+/// agent process dying or being killed (loophole L4). A legitimate uninstall must remove it
+/// (`rm -rf /sys/fs/bpf/sentinel`) or stale pins keep enforcing against a reused pid.
+const PIN_DIR: &str = "/sys/fs/bpf/sentinel";
+
+/// Policy maps worth persisting across a restart. The enforcement state + protected-pid/inode
+/// sets are pinned and REUSED on reload, so a respawned agent shares the exact maps the already
+/// pinned LSM links read — a kill can't drop protection. Ring buffers (telemetry) are ephemeral
+/// and never pinned.
+fn is_persistent_map(name: &str) -> bool {
+    matches!(
+        name,
+        "ENFORCE" | "PROTECTED_PIDS" | "PROTECTED_INODES" | "BLOCKED_EXEC"
+    )
+}
+
 /// Mirror of `struct exec_event` in sentinel.bpf.c (same #[repr(C)] layout).
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -89,6 +105,29 @@ pub fn load_and_run(enforce: Enforce, dns: DnsCache) -> anyhow::Result<Sink> {
              (kill/ptrace/exec/file hooks) stays OFF until a reboot with lsm=bpf"
         );
     }
+
+    // L4: pin the policy maps in bpffs and let libbpf reuse-or-create them on load. Shared,
+    // persistent maps mean a respawned agent writes the SAME PROTECTED_PIDS/ENFORCE the pinned
+    // LSM links already read — so enforcement never lapses across a kill+respawn. Best-effort:
+    // needs bpffs mounted at /sys/fs/bpf (systemd mounts it by default); if unavailable we fall
+    // back to in-process-lifetime enforcement. A schema change that makes a pinned map
+    // incompatible just fails the load → main() degrades to the polling tier (no crash).
+    if std::fs::create_dir_all(PIN_DIR).is_ok() {
+        for mut m in open.maps_mut() {
+            let name = m.name().to_string_lossy().into_owned();
+            if is_persistent_map(&name) {
+                if let Err(e) = m.set_pin_path(std::path::Path::new(PIN_DIR).join(&name)) {
+                    tracing::warn!(map = %name, error = %e, "bpf map set_pin_path failed");
+                }
+            }
+        }
+    } else {
+        tracing::warn!(
+            dir = PIN_DIR,
+            "bpffs pin dir unavailable — enforcement will not persist across an agent restart"
+        );
+    }
+
     let obj = open.load()?;
     // 'static so the ring buffer + links can outlive this function on the poll thread.
     let obj: &'static mut libbpf_rs::Object = Box::leak(Box::new(obj));
@@ -117,6 +156,10 @@ pub fn load_and_run(enforce: Enforce, dns: DnsCache) -> anyhow::Result<Sink> {
             "/usr/local/bin/sentinel-agent",
             "/etc/sentinel/server_cmd.pub",
             "/var/lib/sentinel/policy.json",
+            // protect the unit so root can't neuter ExecStart / delete it to stop respawn.
+            // (mask creates a NEW symlink at this path, so also guard the dir below.)
+            "/etc/systemd/system/sentinel-agent.service",
+            "/etc/systemd/system/multi-user.target.wants/sentinel-agent.service",
         ] {
             if let Ok(meta) = std::fs::metadata(p) {
                 let _ = m.update(&meta.ino().to_ne_bytes(), &[1u8], MapFlags::ANY);
@@ -133,7 +176,14 @@ pub fn load_and_run(enforce: Enforce, dns: DnsCache) -> anyhow::Result<Sink> {
             continue; // LSM progs aren't loaded when lsm=bpf is off
         }
         match prog.attach() {
-            Ok(link) => {
+            Ok(mut link) => {
+                // L4: pin LSM enforcement links so the hooks stay attached even if the agent
+                // dies/is killed. Tracepoints are telemetry-only — not worth persisting. A pin
+                // left by a prior run returns AlreadyExists (ignored): that older link keeps
+                // enforcing via the shared, reused maps, so protection is continuous.
+                if lsm_active && !is_tracepoint(&name) {
+                    let _ = link.pin(format!("{PIN_DIR}/link_{name}"));
+                }
                 links.push(link);
                 attached += 1;
             }

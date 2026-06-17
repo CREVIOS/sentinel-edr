@@ -8,6 +8,7 @@ package pipeline
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -173,6 +174,94 @@ func (p *Processor) runDLP(ev *model.Event) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// StartLivenessMonitor runs the endpoint dead-man's-switch. An agent that stops heartbeating —
+// killed (including SIGKILL/`systemctl stop`), cgroup-frozen, host powered off, or severed from
+// the network — is flipped offline AND raises a high-severity detection through the full alert
+// path (live console broadcast, external notify, auto-opened case). A forceful kill therefore
+// cannot hide: the silence itself is the alarm.
+//
+// `window` is how long an agent may be silent before it's judged dead; `interval` is the sweep
+// cadence. A startup grace of one `window` lets live agents reconnect after a server restart
+// before any are judged silent, avoiding a boot-time alert storm.
+func (p *Processor) StartLivenessMonitor(stop <-chan struct{}, window, interval time.Duration) {
+	go func() {
+		select {
+		case <-stop:
+			return
+		case <-time.After(window): // startup grace
+		}
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				p.sweepLiveness(window)
+			}
+		}
+	}()
+}
+
+func (p *Processor) sweepLiveness(window time.Duration) {
+	silenced, err := p.store.MarkStaleOfflineReturning(window)
+	if err != nil {
+		p.log.Error("liveness sweep", "err", err)
+		return
+	}
+	for _, a := range silenced {
+		// a.Status is the post-UPDATE value (offline) → push it so the console dot greys live.
+		p.bcast.Broadcast("agent", a)
+		silence := time.Since(a.LastSeen).Round(time.Second)
+		ev := model.Event{
+			ID:       uuid.NewString(),
+			AgentID:  a.ID,
+			Hostname: a.Hostname,
+			TS:       time.Now().UTC(),
+			Category: model.CatSystem,
+			Action:   "agent_silent",
+			Severity: model.SevHigh,
+			Message: fmt.Sprintf(
+				"Endpoint %s went silent — no telemetry for %s (possible agent tamper/kill, host shutdown, or network loss)",
+				hostLabel(a), silence),
+		}
+		if err := p.store.InsertEvents([]model.Event{ev}); err != nil {
+			p.log.Error("liveness event persist", "err", err)
+		}
+		p.bcast.Broadcast("event", ev)
+		if err := p.emit(livenessDetection(&ev, a), &ev, ""); err != nil {
+			p.log.Error("liveness emit", "agent", a.ID, "err", err)
+		}
+		p.log.Warn("agent went silent", "agent", a.ID, "host", a.Hostname, "silent_for", silence.String())
+	}
+}
+
+func livenessDetection(ev *model.Event, a *model.Agent) *model.Detection {
+	return &model.Detection{
+		ID:       uuid.NewString(),
+		TS:       time.Now().UTC(),
+		RuleID:   "agent-liveness-lost",
+		RuleName: "Endpoint agent went silent (possible tamper)",
+		Severity: model.SevHigh,
+		Category: model.CatSystem,
+		AgentID:  a.ID,
+		Hostname: a.Hostname,
+		Summary:  ev.Message,
+		MITRE:    []string{"T1562.001"}, // Impair Defenses: Disable or Modify Tools
+		Tactic:   "Defense Evasion",
+		Status:   model.DetOpen,
+		EventIDs: []string{ev.ID},
+		Engine:   "liveness",
+	}
+}
+
+func hostLabel(a *model.Agent) string {
+	if a.Hostname != "" {
+		return a.Hostname
+	}
+	return a.ID
 }
 
 func (p *Processor) emit(d *model.Detection, ev *model.Event, action string) error {

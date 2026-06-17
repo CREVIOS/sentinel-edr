@@ -38,7 +38,9 @@ CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_MODULE CAP_BPF CAP_PERFMON CAP_NET_R
 NoNewPrivileges=true
 OOMScoreAdjust=-1000
 ProtectSystem=full
-ReadWritePaths=/var/lib/sentinel /usr/local/bin
+# /etc/modprobe.d so the USB-storage block can persist its `install … /bin/true` override
+# across reboots despite ProtectSystem=full (the runtime block works regardless).
+ReadWritePaths=/var/lib/sentinel /usr/local/bin /etc/modprobe.d
 ProtectHome=read-only
 ProtectClock=true
 ProtectHostname=true

@@ -637,7 +637,10 @@ impl Responder {
 
             // 2. best-effort live unload (uas first — it depends on usb_storage)
             let _ = Command::new("modprobe").arg("-r").arg("uas").output();
-            let _ = Command::new("modprobe").arg("-r").arg("usb_storage").output();
+            let _ = Command::new("modprobe")
+                .arg("-r")
+                .arg("usb_storage")
+                .output();
 
             // 3. deauthorize already-attached storage devices via sysfs (works while busy)
             let mut deauthorized = 0usize;
@@ -673,14 +676,13 @@ impl Responder {
         #[cfg(target_os = "linux")]
         {
             // 1. remove the persistent override so the driver can load again
-            std::fs::remove_file(USB_BLOCK_CONF)
-                .or_else(|e| {
-                    if e.kind() == std::io::ErrorKind::NotFound {
-                        Ok(())
-                    } else {
-                        Err(format!("remove {USB_BLOCK_CONF}: {e}"))
-                    }
-                })?;
+            std::fs::remove_file(USB_BLOCK_CONF).or_else(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(format!("remove {USB_BLOCK_CONF}: {e}"))
+                }
+            })?;
             // 2. re-authorize any device we deauthorized (kernel re-probes & rebinds)
             let reauthorized = reauthorize_usb_devices();
             // 3. reload the mass-storage drivers (no-op/harmless if built into the kernel)
@@ -865,7 +867,8 @@ fn usb_mass_storage_devices() -> Vec<std::path::PathBuf> {
         let Some((dev, _)) = name.split_once(':') else {
             continue;
         };
-        let class = std::fs::read_to_string(entry.path().join("bInterfaceClass")).unwrap_or_default();
+        let class =
+            std::fs::read_to_string(entry.path().join("bInterfaceClass")).unwrap_or_default();
         if class.trim().eq_ignore_ascii_case("08") {
             let p = base.join(dev);
             if !devs.contains(&p) {

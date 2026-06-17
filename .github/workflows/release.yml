@@ -23,13 +23,15 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: bpf toolchain
+      # Build inside the repo's bookworm image where clang/llvm/libbpf-dev/bpftool are all
+      # packaged (ubuntu-noble has no standalone `bpftool` apt candidate). The runner kernel's
+      # BTF at /sys/kernel/btf/vmlinux is mounted in so build.sh can generate vmlinux.h; the
+      # resulting CO-RE object is portable to every target kernel regardless.
+      - name: build object (bookworm container)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev bpftool libelf-dev gcc make
-      - name: build object
-        working-directory: agent/bpf
-        run: ./build.sh
+          docker build -t sentinel-bpfcc agent/bpf
+          docker run --rm -v /sys/kernel/btf:/sys/kernel/btf:ro \
+            -v "$PWD/agent/bpf":/w -w /w sentinel-bpfcc ./build.sh
       - name: checksum
         working-directory: agent/bpf
         run: sha256sum sentinel.bpf.o > sentinel.bpf.o.sha256

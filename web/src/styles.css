@@ -388,6 +388,59 @@ body {
 .input:focus { border-color: var(--signal); box-shadow: 0 0 0 3px rgba(198,255,58,0.12); }
 .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
 
+/* ---------------- search input ---------------- */
+.search { position: relative; display: inline-flex; align-items: center; }
+.search-ico {
+  position: absolute; left: 11px; font-size: 14px; color: var(--ink-faint);
+  pointer-events: none; line-height: 1;
+}
+.search-input { width: 100%; padding-left: 32px; padding-right: 30px; }
+.search-clear {
+  position: absolute; right: 7px; width: 19px; height: 19px; display: grid; place-items: center;
+  border: none; border-radius: 5px; background: transparent; color: var(--ink-faint);
+  cursor: pointer; font-size: 11px; transition: 0.15s;
+}
+.search-clear:hover { background: var(--bg-2); color: var(--ink); }
+
+/* ---------------- segmented control ---------------- */
+.seg {
+  display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px;
+  background: var(--bg-2); border: 1px solid var(--line);
+}
+.seg-item {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 12px; border: none; border-radius: 7px; cursor: pointer;
+  background: transparent; color: var(--ink-dim);
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.02em; transition: 0.15s;
+}
+.seg-item:hover { color: var(--ink); }
+.seg-item.on {
+  background: rgba(198,255,58,0.1); color: var(--signal);
+  box-shadow: inset 0 0 0 1px rgba(198,255,58,0.3);
+}
+.seg-count {
+  font-size: 10px; padding: 1px 6px; border-radius: 999px;
+  background: rgba(120,145,180,0.15); color: var(--ink-dim); min-width: 16px; text-align: center;
+}
+.seg-item.on .seg-count { background: rgba(198,255,58,0.18); color: var(--signal); }
+.seg-dot { width: 7px; height: 7px; border-radius: 50%; }
+.seg-dot.st-online { background: var(--signal); box-shadow: 0 0 7px var(--signal); }
+.seg-dot.st-offline { background: var(--info); }
+.seg-dot.st-isolated { background: var(--crit); box-shadow: 0 0 7px var(--crit); }
+
+/* ---------------- sortable table headers ---------------- */
+.th-sort { cursor: pointer; user-select: none; transition: color 0.15s; }
+.th-sort:hover { color: var(--ink); }
+.th-sort.on { color: var(--signal); }
+.th-label { display: inline-flex; align-items: center; gap: 5px; }
+.th-caret { font-size: 9px; opacity: 0.45; }
+.th-sort.on .th-caret { opacity: 1; }
+.th-sort:not(.on) .th-caret { opacity: 0; transition: opacity 0.15s; }
+.th-sort:hover .th-caret { opacity: 0.4; }
+
+/* ---------------- filter match highlight ---------------- */
+mark.hl { background: rgba(198,255,58,0.22); color: var(--signal); border-radius: 3px; padding: 0 1px; }
+
 /* ---------------- login ---------------- */
 .login-wrap {
   position: relative; z-index: 1;

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { api, getRole } from "../api";
 import { Drawer, KV } from "../components";
+import { SearchInput, matchText } from "../filters";
 import { useStore } from "../store";
 import type { Detection } from "../types";
 import { Mitre, Panel, Sev, ago } from "../ui";
@@ -9,13 +10,19 @@ export default function Detections() {
   const { detections, events, pushToast, refreshDetections } = useStore();
   const [status, setStatus] = useState("");
   const [sev, setSev] = useState("");
+  const [q, setQ] = useState("");
   const [sel, setSel] = useState<Detection | null>(null);
   const canAct = getRole() === "admin" || getRole() === "analyst";
 
   const rows = useMemo(
     () =>
-      detections.filter((d) => (!status || d.status === status) && (!sev || d.severity === sev)),
-    [detections, status, sev]
+      detections.filter(
+        (d) =>
+          (!status || d.status === status) &&
+          (!sev || d.severity === sev) &&
+          matchText(q, d.hostname, d.user, d.rule_name, d.rule_id, d.summary, d.tactic, d.engine)
+      ),
+    [detections, status, sev, q]
   );
 
   const relatedPid = (d: Detection): number | undefined => {
@@ -47,6 +54,7 @@ export default function Detections() {
   return (
     <>
       <div className="toolbar">
+        <SearchInput value={q} onChange={setQ} placeholder="Filter by host, user, rule, tactic…" width={300} />
         <select className="input" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">All Statuses</option>
           <option value="open">Open</option>
@@ -57,6 +65,7 @@ export default function Detections() {
           <option value="">All Severities</option>
           {["critical", "high", "medium", "low"].map((s) => <option key={s} value={s}>{s.toUpperCase()}</option>)}
         </select>
+        <span style={{ flex: 1 }} />
         <span className="chip">{rows.length} detections</span>
       </div>
 

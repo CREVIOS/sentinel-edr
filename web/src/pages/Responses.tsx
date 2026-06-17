@@ -1,3 +1,5 @@
+import { useMemo, useState } from "react";
+import { SearchInput, Segmented, matchText } from "../filters";
 import { useStore } from "../store";
 import { Panel, Stat, ago } from "../ui";
 
@@ -12,9 +14,21 @@ const TYPE_LABEL: Record<string, string> = {
 
 export default function Responses() {
   const { responses } = useStore();
+  const [q, setQ] = useState("");
+  const [src, setSrc] = useState("all");
   const auto = responses.filter((r) => r.automated).length;
   const done = responses.filter((r) => r.status === "completed").length;
   const failed = responses.filter((r) => r.status === "failed").length;
+
+  const rows = useMemo(
+    () =>
+      responses.filter(
+        (r) =>
+          (src === "all" || (src === "auto" ? r.automated : !r.automated)) &&
+          matchText(q, r.hostname, r.type, TYPE_LABEL[r.type], r.issued_by, r.reason, r.result, targetStr(r.target))
+      ),
+    [responses, q, src]
+  );
 
   return (
     <div className="grid" style={{ gap: 18 }}>
@@ -25,6 +39,21 @@ export default function Responses() {
         <Stat label="Failed" value={failed} crit={failed > 0} foot={<span>need attention</span>} />
       </div>
 
+      <div className="toolbar">
+        <Segmented
+          value={src}
+          onChange={setSrc}
+          options={[
+            { value: "all", label: "All", count: responses.length },
+            { value: "auto", label: "Automated", count: auto },
+            { value: "manual", label: "Manual", count: responses.length - auto },
+          ]}
+        />
+        <SearchInput value={q} onChange={setQ} placeholder="Filter by host, action, issuer, result…" width={300} />
+        <span style={{ flex: 1 }} />
+        <span className="chip">{rows.length} shown</span>
+      </div>
+
       <Panel title="RESPONSE ACTIONS" sub="Monitor → Detect → Prevent → Respond">
         <div className="table-wrap scroll">
           <table className="table">
@@ -32,7 +61,7 @@ export default function Responses() {
               <tr><th>Time</th><th>Action</th><th>Target</th><th>Host</th><th>Source</th><th>Issued By</th><th>Status</th><th>Result</th></tr>
             </thead>
             <tbody>
-              {responses.map((r) => (
+              {rows.map((r) => (
                 <tr key={r.id} className="row-enter">
                   <td className="mono dim">{ago(r.ts)}</td>
                   <td className="mono">{TYPE_LABEL[r.type] || r.type}</td>
@@ -46,7 +75,7 @@ export default function Responses() {
               ))}
             </tbody>
           </table>
-          {responses.length === 0 && <div className="empty">no response actions yet</div>}
+          {rows.length === 0 && <div className="empty">{responses.length === 0 ? "no response actions yet" : "no actions match this filter"}</div>}
         </div>
       </Panel>
     </div>

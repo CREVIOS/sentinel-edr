@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { api, getRole } from "../api";
-import { Drawer, KV } from "../components";
+import { ConfirmButton, Copyable, Drawer, KV } from "../components";
 import { SearchInput, matchText } from "../filters";
 import { useStore } from "../store";
 import type { Detection } from "../types";
@@ -109,10 +109,10 @@ export default function Detections() {
               {canAct && (
                 <>
                   {relatedPid(sel) && (
-                    <button className="btn btn-danger btn-sm" onClick={() => respond(sel, "kill_process", { pid: relatedPid(sel) })}>Kill PID {relatedPid(sel)}</button>
+                    <ConfirmButton className="btn btn-danger btn-sm" confirmLabel={`Kill ${relatedPid(sel)}`} onConfirm={() => respond(sel, "kill_process", { pid: relatedPid(sel) })}>Kill PID {relatedPid(sel)}</ConfirmButton>
                   )}
-                  <button className="btn btn-danger btn-sm" onClick={() => respond(sel, "isolate")}>Isolate Host</button>
-                  {sel.user && <button className="btn btn-sm" onClick={() => respond(sel, "disable_account", { user: sel.user })}>Disable {sel.user}</button>}
+                  <ConfirmButton className="btn btn-danger btn-sm" confirmLabel="Isolate" onConfirm={() => respond(sel, "isolate")}>Isolate Host</ConfirmButton>
+                  {sel.user && <ConfirmButton className="btn btn-sm" confirmLabel={`Disable ${sel.user}`} onConfirm={() => respond(sel, "disable_account", { user: sel.user })}>Disable {sel.user}</ConfirmButton>}
                 </>
               )}
             </div>

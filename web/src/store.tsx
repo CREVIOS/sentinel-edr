@@ -22,6 +22,7 @@ interface StoreState {
   refreshDetections: () => void;
   refreshResponses: () => void;
   pushToast: (text: string, crit?: boolean) => void;
+  dismissToast: (id: string) => void;
 }
 
 const Ctx = createContext<StoreState>(null as any);
@@ -44,10 +45,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     api.detections({ limit: "200" }).then((d) => setDetections(d || [])).catch(() => {});
   const refreshResponses = () => api.responses().then((r) => setResponses(r || [])).catch(() => {});
 
+  const dismissToast = (id: string) => setToasts((t) => t.filter((x) => x.id !== id));
   const pushToast = (text: string, crit?: boolean) => {
     const id = Math.random().toString(36).slice(2);
     setToasts((t) => [...t, { id, text, crit }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+    setTimeout(() => dismissToast(id), 6000);
   };
 
   useEffect(() => {
@@ -104,6 +106,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     refreshDetections,
     refreshResponses,
     pushToast,
+    dismissToast,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

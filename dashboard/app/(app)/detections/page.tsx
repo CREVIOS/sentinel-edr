@@ -16,6 +16,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { MitreChips, KillChainStrip } from "@/components/mitre";
 import { AttackStory } from "@/components/attack-story";
 import { IncidentSummary, type Recommendation } from "@/components/incident-summary";
+import { AiTriage } from "@/components/ai-triage";
 import { useData, respond, postJSON } from "@/lib/use-data";
 import { ago } from "@/lib/format";
 import type { Detection, Event } from "@/lib/types";
@@ -219,6 +220,7 @@ export default function DetectionsPage() {
               incident={{ severity: sel.severity, hostname: sel.hostname, agentId: sel.agent_id, user: sel.user, ruleName: sel.rule_name, summary: sel.summary, engine: sel.engine, tactic: sel.tactic, mitre: sel.mitre, eventCount: (sel.event_ids || []).length }}
               onRecommend={(r) => recommend(sel, r)}
             />
+            <AiTriage detectionId={sel.id} />
             <AttackStory agentId={sel.agent_id} eventIds={sel.event_ids} onSelectEvent={(e) => setEvent(e)} />
           </div>
         )}

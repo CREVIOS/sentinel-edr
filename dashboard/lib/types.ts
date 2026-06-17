@@ -26,6 +26,10 @@ export interface ResponseAction {
   id: string; ts: string; type: string; agent_id: string; hostname: string; target: Record<string, unknown>;
   reason: string; issued_by: string; detection_id?: string; status: string; result?: string; automated: boolean;
 }
+export interface TriageResult {
+  summary: string; assessment: string; recommended_actions: string[];
+  confidence: string; model: string; generated_at: string; cached: boolean;
+}
 export interface Rule { ID: string; Title: string; Severity: string; Category: string; Tactic: string; Description: string; AutoRespond: string; MITRE: string[] | null; Enabled: boolean; }
 
 export type CaseStatus = "open" | "investigating" | "contained" | "closed";

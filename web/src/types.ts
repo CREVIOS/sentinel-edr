@@ -115,6 +115,15 @@ export interface ResponseAction {
   result?: string;
   automated: boolean;
 }
+export interface TriageResult {
+  summary: string;
+  assessment: string;
+  recommended_actions: string[];
+  confidence: string;
+  model: string;
+  generated_at: string;
+  cached: boolean;
+}
 export type CaseStatus = "open" | "investigating" | "contained" | "closed";
 export interface CaseNote {
   ts: string;

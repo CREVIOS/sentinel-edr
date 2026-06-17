@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, getRole } from "../api";
 import { ConfirmButton, Copyable, Drawer, KV } from "../components";
 import { SearchInput, matchText } from "../filters";
 import { ProcessTree } from "../ProcessTree";
 import { useStore } from "../store";
-import type { Detection } from "../types";
+import type { Detection, TriageResult } from "../types";
 import { Mitre, Panel, Sev, ago } from "../ui";
 
 export default function Detections() {
@@ -13,7 +13,28 @@ export default function Detections() {
   const [sev, setSev] = useState("");
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Detection | null>(null);
+  const [triage, setTriage] = useState<TriageResult | null>(null);
+  const [triaging, setTriaging] = useState(false);
+  const [triageErr, setTriageErr] = useState("");
   const canAct = getRole() === "admin" || getRole() === "analyst";
+
+  // reset AI triage state when a different detection is opened
+  useEffect(() => {
+    setTriage(null);
+    setTriageErr("");
+  }, [sel?.id]);
+
+  const runTriage = async (d: Detection) => {
+    setTriaging(true);
+    setTriageErr("");
+    try {
+      setTriage(await api.triageDetection(d.id));
+    } catch (e) {
+      setTriageErr(String(e).replace(/^Error:\s*/, ""));
+    } finally {
+      setTriaging(false);
+    }
+  };
 
   const rows = useMemo(
     () =>
@@ -151,9 +172,55 @@ export default function Detections() {
               </div>
             ) : null;
           })()}
+
+          <div style={{ marginTop: 18 }}>
+            <div className="page-kicker" style={{ marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
+              <span>AI Triage</span>
+              {!triage && (
+                <button className="btn btn-sm" disabled={triaging} onClick={() => runTriage(sel)}>
+                  {triaging ? "Analyzing…" : "✨ Analyze"}
+                </button>
+              )}
+            </div>
+            {triageErr && <div className="ai-err">{triageErr}</div>}
+            {triage && <TriageCard t={triage} />}
+            {!triage && !triageErr && !triaging && (
+              <div className="dim" style={{ fontSize: 12 }}>Summarize this detection and suggest next actions.</div>
+            )}
+          </div>
         </Drawer>
       )}
     </>
+  );
+}
+
+function TriageCard({ t }: { t: TriageResult }) {
+  const conf = (t.confidence || "").toLowerCase();
+  const confColor = conf === "high" ? "var(--signal)" : conf === "medium" ? "var(--low)" : "var(--ink-faint)";
+  return (
+    <div className="ai-card">
+      <div className="ai-row">
+        <span className="ai-badge">✨ {t.model || "claude"}</span>
+        {t.confidence && <span className="chip" style={{ color: confColor, borderColor: confColor }}>{t.confidence} confidence</span>}
+        {t.cached && <span className="chip">cached</span>}
+      </div>
+      <p className="ai-summary">{t.summary}</p>
+      {t.assessment && (
+        <>
+          <div className="ai-label">Assessment</div>
+          <p className="ai-text">{t.assessment}</p>
+        </>
+      )}
+      {t.recommended_actions && t.recommended_actions.length > 0 && (
+        <>
+          <div className="ai-label">Recommended actions</div>
+          <ol className="ai-actions">
+            {t.recommended_actions.map((a, i) => <li key={i}>{a}</li>)}
+          </ol>
+        </>
+      )}
+      <div className="dim ai-foot">AI-generated · verify before acting</div>
+    </div>
   );
 }
 

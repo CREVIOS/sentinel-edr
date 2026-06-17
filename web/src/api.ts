@@ -1,7 +1,7 @@
 // Thin API client. All URLs are relative so the same build works behind the Vite dev
 // proxy and when served from the Go server in production.
 
-import type { Agent, Case, CaseDetail, Detection, Event, Overview, ResponseAction, Rule } from "./types";
+import type { Agent, Case, CaseDetail, Detection, Event, Overview, ResponseAction, Rule, TriageResult } from "./types";
 
 const USER_KEY = "sentinel_user";
 const ROLE_KEY = "sentinel_role";
@@ -69,6 +69,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ status }),
     }),
+  triageDetection: (id: string) =>
+    req<TriageResult>(`/api/v1/detections/${id}/triage`, { method: "POST" }),
   respond: (body: {
     type: string;
     agent_id: string;

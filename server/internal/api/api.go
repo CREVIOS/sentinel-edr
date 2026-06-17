@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"encoding/json"
 	"io"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/sentinel/server/internal/ai"
 	"github.com/sentinel/server/internal/auth"
 	"github.com/sentinel/server/internal/bus"
 	"github.com/sentinel/server/internal/config"
@@ -46,6 +48,7 @@ type Server struct {
 	dlp         *dlp.Engine
 	respond     *respond.Orchestrator
 	tune        *tune.Engine
+	ai          *ai.Triager
 	limiter     *auth.Limiter
 	ingestLimit *auth.Limiter
 	log         *slog.Logger
@@ -64,6 +67,7 @@ type Deps struct {
 	DLP     *dlp.Engine
 	Respond *respond.Orchestrator
 	Tune    *tune.Engine
+	AI      *ai.Triager
 	Log     *slog.Logger
 }
 
@@ -79,7 +83,7 @@ func New(d Deps) *Server {
 	}
 	return &Server{
 		cfg: d.Cfg, store: d.Store, auth: d.Auth, hub: d.Hub, bcast: bcast, bus: d.Bus,
-		detect: d.Detect, dlp: d.DLP, respond: d.Respond, tune: d.Tune,
+		detect: d.Detect, dlp: d.DLP, respond: d.Respond, tune: d.Tune, ai: d.AI,
 		limiter:     auth.NewLimiter(5, 15),     // auth surface: 5 req/s, burst 15
 		ingestLimit: auth.NewLimiter(500, 1000), // ingest surface, per source IP
 		log:         d.Log,
@@ -140,6 +144,7 @@ func (s *Server) Handler() http.Handler {
 
 	// console write APIs (analyst+)
 	mux.HandleFunc("POST /api/v1/detections/{id}/status", s.auth.Require(auth.RoleAnalyst, s.setDetectionStatus))
+	mux.HandleFunc("POST /api/v1/detections/{id}/triage", s.auth.Require(auth.RoleAnalyst, s.triageDetection))
 	mux.HandleFunc("POST /api/v1/respond", s.auth.Require(auth.RoleAnalyst, s.issueResponse))
 
 	// fleet management (admin): push collection policy + verified agent self-update.
@@ -803,6 +808,86 @@ func (s *Server) setDetectionStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	s.bcast.Broadcast("detection", d)
 	writeJSON(w, http.StatusOK, d)
+}
+
+// triageDetection builds an evidence package for a detection and asks Claude for an analyst
+// triage (summary, assessment, recommended actions). Cached per detection in the Triager.
+func (s *Server) triageDetection(w http.ResponseWriter, r *http.Request) {
+	if s.ai == nil {
+		http.Error(w, "AI triage not configured — set ANTHROPIC_API_KEY on the server", http.StatusNotImplemented)
+		return
+	}
+	id := r.PathValue("id")
+	d, err := s.store.GetDetection(id)
+	if err != nil || d == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	evidence := s.buildTriageEvidence(d)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	res, err := s.ai.Triage(ctx, d.ID, evidence)
+	if err != nil {
+		s.log.Error("ai triage", "detection", id, "err", err)
+		http.Error(w, "triage failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// buildTriageEvidence assembles a compact JSON evidence package: the detection, the telemetry
+// events it correlated, and the endpoint context — everything the model needs and nothing more.
+func (s *Server) buildTriageEvidence(d *model.Detection) string {
+	ev := map[string]any{
+		"detection": map[string]any{
+			"rule_id": d.RuleID, "rule_name": d.RuleName, "severity": d.Severity,
+			"category": d.Category, "engine": d.Engine, "summary": d.Summary,
+			"mitre": d.MITRE, "tactic": d.Tactic, "hostname": d.Hostname, "user": d.User,
+			"detected_at": d.TS,
+		},
+	}
+	// endpoint context
+	if a, err := s.store.GetAgent(d.AgentID); err == nil && a != nil {
+		ev["endpoint"] = map[string]any{
+			"hostname": a.Hostname, "os": a.OS, "kernel": a.Kernel,
+			"ip": a.IP, "labels": a.Labels, "status": a.Status,
+		}
+	}
+	// related telemetry: pull recent events for the agent and keep the ones this detection cited.
+	want := map[string]bool{}
+	for _, eid := range d.EventIDs {
+		want[eid] = true
+	}
+	rows, _ := s.store.QueryEvents(store.EventFilter{AgentID: d.AgentID, Limit: 300})
+	var related []map[string]any
+	for _, e := range rows {
+		if !want[e.ID] {
+			continue
+		}
+		m := map[string]any{
+			"ts": e.TS, "category": e.Category, "action": e.Action,
+			"severity": e.Severity, "user": e.User, "message": e.Message,
+		}
+		if e.Process != nil {
+			m["process"] = map[string]any{"name": e.Process.Name, "pid": e.Process.PID, "cmdline": e.Process.Cmdline, "lineage": e.Process.Lineage}
+		}
+		if e.File != nil {
+			m["file"] = map[string]any{"path": e.File.Path, "op": e.File.Op}
+		}
+		if e.Network != nil {
+			m["network"] = map[string]any{"domain": e.Network.Domain, "remote": e.Network.Remote, "bytes_out": e.Network.BytesOut}
+		}
+		if e.DLP != nil {
+			m["dlp"] = map[string]any{"classifier": e.DLP.Classifier, "channel": e.DLP.Channel, "verdict": e.DLP.Verdict}
+		}
+		related = append(related, m)
+		if len(related) >= 25 {
+			break
+		}
+	}
+	ev["related_events"] = related
+	b, _ := json.Marshal(ev)
+	return string(b)
 }
 
 type respondReq struct {

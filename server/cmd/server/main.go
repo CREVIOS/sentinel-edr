@@ -182,20 +182,11 @@ func main() {
 		log.Info("correlator started")
 	}
 
-	// background: flip silent agents to offline
+	// background: dead-man's-switch. Flip silent agents offline AND raise a high-severity
+	// tamper alert (live to the console, notified, auto-cased) — a forceful kill of an agent
+	// surfaces as a detection, not just a quietly greyed-out dot.
 	stopTicker := make(chan struct{})
-	go func() {
-		t := time.NewTicker(30 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-t.C:
-				_ = st.MarkStaleOffline(2 * time.Minute)
-			case <-stopTicker:
-				return
-			}
-		}
-	}()
+	proc.StartLivenessMonitor(stopTicker, 2*time.Minute, 30*time.Second)
 
 	var srv *http.Server
 	servesHTTP := cfg.Role == "all" || cfg.RunsRole("ingest") || cfg.RunsRole("gateway")

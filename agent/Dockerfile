@@ -1,4 +1,10 @@
 # Build the Rust agent and ship on a slim Debian with the tools enforcement needs.
+#
+# NOTE: this demo image is built WITHOUT `--features ebpf` and runs on the userspace polling
+# tier. Kernel tamper-protection (the LSM kill/ptrace/file hooks) requires a privileged host
+# with `lsm=bpf` and the sentinel.bpf.o object — neither applies to this unprivileged demo
+# container. Production endpoints get the eBPF-enabled binary + BPF object via the host
+# installer (deploy/app2/install-agent.sh), which the release pipeline builds with --features ebpf.
 FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY agent/Cargo.toml agent/Cargo.lock* ./

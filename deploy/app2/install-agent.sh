@@ -46,6 +46,64 @@ sc_curl() {
 
 need_root() { [ "$(id -u)" = "0" ] || die "run as root (use sudo)"; }
 
+# Enable the bpf LSM so the agent's in-kernel kill/ptrace/file tamper-protection hooks can
+# attach (loophole L2). They are inert until 'bpf' is in the kernel's lsm= cmdline. This is
+# OFF by default on most distros and requires a reboot to take effect.
+#
+# DANGEROUS: editing the kernel cmdline can make a host unbootable, so it is OPT-IN
+# (SENTINEL_ENABLE_BPF_LSM=1). We back up /etc/default/grub, APPEND 'bpf' to the EXISTING LSM
+# list (never replace it — dropping apparmor/selinux/lockdown would weaken the host), and
+# regenerate the bootloader config. Without opt-in we only print the exact manual steps.
+NEEDS_REBOOT=0
+enable_bpf_lsm() {
+  if grep -qw bpf /sys/kernel/security/lsm 2>/dev/null; then
+    log "bpf LSM already active — kernel tamper-protection available"
+    return 0
+  fi
+  local cur want
+  cur="$(cat /sys/kernel/security/lsm 2>/dev/null || true)"
+  if [ -z "$cur" ]; then want="bpf"; else want="${cur},bpf"; fi
+
+  if [ "${SENTINEL_ENABLE_BPF_LSM:-0}" != "1" ]; then
+    warn "kernel tamper-protection (kill/ptrace/file LSM) is OFF: 'bpf' is not in lsm= cmdline."
+    warn "  enable automatically (will edit GRUB + require reboot): re-run with SENTINEL_ENABLE_BPF_LSM=1"
+    warn "  or manually: add 'lsm=${want}' to GRUB_CMDLINE_LINUX in /etc/default/grub, run update-grub, reboot"
+    return 0
+  fi
+
+  if [ ! -f /etc/default/grub ]; then
+    warn "SENTINEL_ENABLE_BPF_LSM=1 but /etc/default/grub not found (non-GRUB bootloader?)."
+    warn "Manually add 'lsm=${want}' to the kernel cmdline and reboot."
+    return 0
+  fi
+
+  cp -a /etc/default/grub "/etc/default/grub.sentinel.bak.$(date +%s)"
+  if grep -qE 'GRUB_CMDLINE_LINUX="[^"]*lsm=' /etc/default/grub; then
+    # an lsm= is already present in GRUB_CMDLINE_LINUX → rewrite just that token
+    sed -i -E "s/lsm=[^[:space:]\"']*/lsm=${want}/" /etc/default/grub
+  elif grep -qE '^GRUB_CMDLINE_LINUX="' /etc/default/grub; then
+    sed -i -E "s/^(GRUB_CMDLINE_LINUX=\")/\1lsm=${want} /" /etc/default/grub
+  else
+    warn "could not locate GRUB_CMDLINE_LINUX in /etc/default/grub — add 'lsm=${want}' manually + reboot."
+    return 0
+  fi
+
+  if ! grep -qE "GRUB_CMDLINE_LINUX=\"[^\"]*lsm=${want}" /etc/default/grub; then
+    warn "GRUB edit did not apply cleanly — restore from /etc/default/grub.sentinel.bak.* and add lsm=${want} manually."
+    return 0
+  fi
+
+  if command -v update-grub >/dev/null 2>&1; then
+    update-grub
+  elif command -v grub2-mkconfig >/dev/null 2>&1; then
+    if [ -d /boot/grub2 ]; then grub2-mkconfig -o /boot/grub2/grub.cfg; else grub2-mkconfig -o /boot/grub/grub.cfg; fi
+  else
+    warn "no update-grub/grub2-mkconfig found — regenerate the bootloader config manually."
+  fi
+  NEEDS_REBOOT=1
+  log "added 'lsm=${want}' to the GRUB cmdline (backup saved). REBOOT required to activate kernel tamper-protection."
+}
+
 require_https() {
   case "$1" in
     https://*) ;;
@@ -158,10 +216,11 @@ main() {
   fi
 
   # --- 2) install enforcement deps (best-effort) ----------------------------------------
+  # libnotify-bin (notify-send) + util-linux (wall) power the end-user "blocked" warnings.
   if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq && apt-get install -y -qq nftables iproute2 procps usbutils >/dev/null 2>&1 || true
+    apt-get update -qq && apt-get install -y -qq nftables iproute2 procps usbutils libnotify-bin util-linux >/dev/null 2>&1 || true
   elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y -q nftables iproute procps-ng usbutils >/dev/null 2>&1 || true
+    dnf install -y -q nftables iproute procps-ng usbutils libnotify util-linux >/dev/null 2>&1 || true
   fi
 
   # --- 3) install binary atomically (stop first to avoid ETXTBSY on upgrade) -------------
@@ -170,6 +229,30 @@ main() {
   fi
   install -m 0755 "$staged" "$BIN"; rm -f "$staged"
   log "installed binary → $BIN"
+
+  # --- 3b) install the CO-RE BPF object (kernel telemetry + tamper-protection) -----------
+  # Loaded at runtime from /usr/lib/sentinel/sentinel.bpf.o. It carries the LSM kill/ptrace/
+  # file-protection hooks; without it the agent falls back to the userspace polling tier with
+  # NO kernel tamper-protection. Verified with the same checksum+signature trust as the binary
+  # (a tampered BPF object runs in-kernel as root — it must be authenticated).
+  mkdir -p /usr/lib/sentinel
+  if [ -n "${SENTINEL_BPF_OBJECT:-}" ] && [ -r "${SENTINEL_BPF_OBJECT}" ]; then
+    install -m 0644 "$SENTINEL_BPF_OBJECT" /usr/lib/sentinel/sentinel.bpf.o
+    log "installed BPF object → /usr/lib/sentinel/sentinel.bpf.o (provided)"
+  elif [ -n "${SENTINEL_RELEASE_URL:-}" ]; then
+    local bpf_url bpf_staged
+    bpf_url="${SENTINEL_RELEASE_URL%/}/sentinel.bpf.o"
+    bpf_staged="$(mktemp)"
+    if sc_curl "$bpf_url" -o "$bpf_staged" 2>/dev/null; then
+      verify_checksum "$bpf_staged" "$bpf_url.sha256"
+      verify_signature "$bpf_staged" "$bpf_url.sig"
+      install -m 0644 "$bpf_staged" /usr/lib/sentinel/sentinel.bpf.o
+      log "installed BPF object → /usr/lib/sentinel/sentinel.bpf.o"
+    else
+      warn "BPF object not found at $bpf_url — agent will run telemetry-only (no kernel tamper-protection)"
+    fi
+    rm -f "$bpf_staged"
+  fi
 
   # --- 4) write config (root-only) ------------------------------------------------------
   mkdir -p "$ETC"; umask 077
@@ -197,6 +280,9 @@ EnvironmentFile=-/etc/sentinel/agent.env
 ExecStart=/usr/local/bin/sentinel-agent
 Restart=always
 RestartSec=5
+# Respawn on SIGKILL/SIGTERM/clean-exit/crash (defeats `systemctl kill`, `kill -9`, self-exit).
+# A manual `systemctl stop` is still honored — covered by kernel kill-deny + tamper alert.
+RestartForceExitStatus=0 1 2 SIGTERM SIGKILL
 StateDirectory=sentinel
 Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json
 
@@ -242,9 +328,16 @@ UNIT
     log "no systemd; start manually: SENTINEL_STATE=/var/lib/sentinel/agent.json $BIN"
   fi
 
+  # --- 6) enable kernel tamper-protection (bpf LSM) -------------------------------------
+  enable_bpf_lsm
+
   echo
   log "Sentinel agent installed & enrolled against $SERVER"
   log "logs: journalctl -u sentinel-agent -f"
+  if [ "$NEEDS_REBOOT" = "1" ]; then
+    echo
+    warn "REBOOT REQUIRED: kernel tamper-protection (lsm=bpf) activates on next boot."
+  fi
 }
 
 # Execute only after the whole script has downloaded — guards against partial-pipe execution.

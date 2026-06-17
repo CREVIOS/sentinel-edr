@@ -17,6 +17,12 @@ EnvironmentFile=-/etc/sentinel/agent.env
 ExecStart=/usr/local/bin/sentinel-agent
 Restart=always
 RestartSec=5
+# Respawn even on a "clean" exit code or a SIGKILL/SIGTERM that didn't come from a manual
+# `systemctl stop` — defeats `systemctl kill`, `kill -9`, self-exit, and crashes. (A manual
+# `systemctl stop`/`disable` is still honored by systemd; that path is covered by the kernel
+# kill-deny + a loud tamper alert, not by fighting the init system, which would also break the
+# verified self-update restart and in-place upgrades.)
+RestartForceExitStatus=0 1 2 SIGTERM SIGKILL
 # Always-on, survives reboots; restarts on crash.
 StateDirectory=sentinel
 Environment=SENTINEL_STATE=/var/lib/sentinel/agent.json

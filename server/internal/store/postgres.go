@@ -195,6 +195,31 @@ func (s *pgStore) MarkStaleOffline(window time.Duration) error {
 	return err
 }
 
+func (s *pgStore) MarkStaleOfflineReturning(window time.Duration) ([]*model.Agent, error) {
+	cutoff := time.Now().UTC().Add(-window)
+	// Transition any live state (online or isolated) → offline. RETURNING makes the read+flip
+	// atomic, so in a multi-instance deployment exactly one server sees each transition and the
+	// dead-man's-switch fires a single alert per silenced agent.
+	rows, err := s.db.Query(
+		`UPDATE agents SET status='offline'
+		   WHERE status IN ('online','isolated') AND last_seen < $1
+		 RETURNING id,hostname,os,kernel,arch,ip,mac,version,status,labels,key,enrolled_at,last_seen,event_count`,
+		cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Agent
+	for rows.Next() {
+		a, err := scanAgentPG(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 func (s *pgStore) InsertEvents(evs []model.Event) error {
 	if len(evs) == 0 {
 		return nil

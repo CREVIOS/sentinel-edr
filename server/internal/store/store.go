@@ -35,6 +35,10 @@ type Store interface {
 	GetAgent(id string) (*model.Agent, error)
 	ListAgents() ([]*model.Agent, error)
 	MarkStaleOffline(window time.Duration) error
+	// MarkStaleOfflineReturning flips agents silent longer than window to offline and returns
+	// exactly the rows it transitioned, atomically — so the dead-man's-switch alert fires once
+	// per silenced agent even across a scaled, multi-instance deployment.
+	MarkStaleOfflineReturning(window time.Duration) ([]*model.Agent, error)
 
 	// events
 	InsertEvents(evs []model.Event) error

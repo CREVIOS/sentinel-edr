@@ -15,6 +15,7 @@ mod dnscache;
 mod dnssniff;
 mod ebpf;
 mod event;
+mod notify;
 mod respond;
 mod scenario;
 mod spool;
@@ -159,6 +160,7 @@ async fn main() -> Result<()> {
     );
 
     let mut ticks: u64 = 0;
+    let mut warn_state = WarnState::default();
     let mut cur_interval = policy.read().map(|p| p.interval_secs).unwrap_or(5).max(1);
     let mut interval = tokio::time::interval(Duration::from_secs(cur_interval));
     let mut pkg_interval = 0u64;
@@ -226,6 +228,9 @@ async fn main() -> Result<()> {
 
         // reflect active enforcement in outgoing telemetry
         annotate_enforcement(&mut batch, &enforcement);
+
+        // warn the person at the keyboard when a block just intercepted their action
+        maybe_warn_user(&batch, &mut warn_state);
 
         // always send a heartbeat so the server keeps us "online"
         batch.push(heartbeat(ticks, &spool));
@@ -301,6 +306,46 @@ fn annotate_enforcement(batch: &mut [event::Event], enf: &Enforcement) {
                 }
             }
         }
+    }
+}
+
+/// Rate-limit state so a sustained block (events labeled every tick) warns the user once
+/// per cooldown instead of spamming a popup on every collection cycle.
+#[derive(Default)]
+struct WarnState {
+    last_usb: Option<std::time::Instant>,
+    last_upload: Option<std::time::Instant>,
+}
+
+const WARN_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// Fire an endpoint warning when this batch shows a freshly-blocked USB or upload action.
+/// Keys off the labels `annotate_enforcement` stamps, so it only triggers when enforcement
+/// actually intercepted something (a drive used while blocked, an upload dropped).
+fn maybe_warn_user(batch: &[event::Event], st: &mut WarnState) {
+    let has = |label: &str| {
+        batch
+            .iter()
+            .any(|e| e.labels.iter().any(|l| l == label))
+    };
+    let now = std::time::Instant::now();
+    let due = |last: &Option<std::time::Instant>| {
+        last.map_or(true, |t| now.duration_since(t) >= WARN_COOLDOWN)
+    };
+
+    if has("usb-blocked") && due(&st.last_usb) {
+        st.last_usb = Some(now);
+        notify::warn(
+            "USB storage blocked",
+            "Removable USB storage is disabled by security policy. Files cannot be copied to this device. Contact IT if you need an exception.",
+        );
+    }
+    if has("upload-blocked") && due(&st.last_upload) {
+        st.last_upload = Some(now);
+        notify::warn(
+            "Upload blocked",
+            "Outbound file upload was blocked by data-loss-prevention policy.",
+        );
     }
 }
 

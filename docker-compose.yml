@@ -65,9 +65,13 @@ services:
     restart: unless-stopped
     depends_on:
       - server
-    # NET_ADMIN lets the agent apply nftables isolation/upload-block rules.
+    # NET_ADMIN: nftables isolation/upload-block rules.
+    # SYS_MODULE: unload USB mass-storage drivers for USB block (modprobe -r).
+    # NOTE: full USB enforcement (sysfs deauthorize) also needs a writable host /sys;
+    # in a container it is best-effort — real USB control belongs on the host/systemd agent.
     cap_add:
       - NET_ADMIN
+      - SYS_MODULE
     environment:
       SENTINEL_SERVER: http://server:8080
       SENTINEL_ENROLL_TOKEN: ${SENTINEL_ENROLL_TOKEN:-change-me-enrollment-token}
